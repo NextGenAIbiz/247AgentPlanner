@@ -255,7 +255,16 @@
     const finalKey = `period:${Store.periodKey(appConfig.month, appConfig.year)}:final`;
     const regKind  = Store.classifyRegisterKey(k, appConfig.month, appConfig.year);
 
-    if (k === "people") fillNameDropdown();
+    if (k === "people") {
+      // Admin renamed/added/removed someone on another device. Refresh the
+      // dropdown immediately. Also re-render the user's row so the name shown
+      // next to the ID updates -- but only if the user isn't mid-edit, so we
+      // never throw away unsaved input.
+      fillNameDropdown();
+      const inputs = document.querySelectorAll("#row-area input.cell");
+      const dirty = myId && [...inputs].some(i => i === document.activeElement);
+      if (!dirty) renderMyRow();
+    }
     else if (k === "config") {
       // Only the freeze flag is interesting -- our period is fixed by the clock.
       refreshPeriodInfo();

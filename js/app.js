@@ -863,7 +863,14 @@
     const cur = Store.currentPaths();
     const regKind = Store.classifyRegisterKey(k, appConfig.month, appConfig.year);
 
-    if (k === "people") loadPeople();
+    if (k === "people") {
+      // The People list changed on another browser. Refresh People AND
+      // every tab that shows person names (Register + Final Plan), so the
+      // Name column reflects the new value immediately.
+      loadPeople();
+      loadRegister();
+      loadFinal();
+    }
     else if (k === "config") {
       const newCfg = Store.getConfig();
       appConfig = { ...appConfig, ...newCfg, periods: Store.listPeriods() };
