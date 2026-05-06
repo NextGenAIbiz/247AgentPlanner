@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Shift Planner &middot; Register your shifts</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="register-page">
+  <h1>Register your shifts for next month</h1>
+  <div class="subtitle">
+    Pick your name and fill in the shift code (or <b>N</b>/<b>P</b>) for the
+    days you want to register. Your changes are saved live to the shared plan.
+    <span id="cloud-badge" class="badge-cloud">starting...</span>
+  </div>
+
+  <div class="register-card">
+    <div class="register-name-row">
+      <label for="name-sel">Your name:</label>
+      <select id="name-sel">
+        <option value="">-- choose --</option>
+      </select>
+      <span id="period-info" class="period">loading period...</span>
+    </div>
+
+    <div class="register-help">
+      Use <b>N</b> for a day off, <b>P</b> for annual leave, or a shift code
+      such as <b>C6</b>, <b>C7</b>, <b>C830</b> for a specific shift. Leave a
+      cell blank to let the planner choose for you.
+    </div>
+
+    <div id="row-area" class="register-empty">Pick your name to begin.</div>
+
+    <div class="toolbar" id="row-toolbar" style="display:none">
+      <button class="btn-primary"   onclick="RegApp.save()">Save</button>
+      <button class="btn-secondary" onclick="RegApp.reload()">Reload</button>
+      <span id="reg-status" class="status" style="display:none"></span>
+    </div>
+  </div>
+
+  <div id="final-card" class="register-final-card" style="display:none">
+    <h3>Your assigned shifts (after the admin generates the plan)</h3>
+    <div id="final-row"></div>
+  </div>
+
+  <div class="subtitle" style="text-align:center; margin-top:24px">
+    Are you the planner?
+    <a href="index.html">Open the Admin page</a>
+  </div>
+</div>
+
+<!-- External libraries -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.min.js"></script>
+
+<!-- Optional pre-bundled snapshot used only when cloud is unconfigured/empty -->
+<script src="data/seed.js" onerror="window.SHIFT_PLANNER_SEED=null"></script>
+
+<!-- App modules -->
+<script src="js/config.js"></script>
+<script src="js/csv.js"></script>
+<script src="js/cloud.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/register-app.js"></script>
+
+</body>
+</html>

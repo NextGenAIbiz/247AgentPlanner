@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Shift Planner &middot; Admin</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ------ PIN gate (covers the page until the right PIN is entered) ------ -->
+<div id="pin-gate" class="pin-gate">
+  <div class="pin-card">
+    <h2>Admin access</h2>
+    <p id="pin-msg">Enter the admin PIN to load the planner.</p>
+    <input id="pin-input" type="password" inputmode="numeric" autocomplete="off"
+           placeholder="PIN" maxlength="20" />
+    <button id="pin-btn" class="btn-primary">Unlock</button>
+    <p id="pin-error" class="pin-error" style="display:none"></p>
+    <p class="hint">
+      Are you a team member? Go to the
+      <a href="register.html">Register page</a> instead.
+    </p>
+  </div>
+</div>
+
+<h1>Shift Planner <span class="role-badge">Admin</span></h1>
+<div class="subtitle">
+  Register expected days &middot; Update demand &middot; Generate the final plan
+  <span id="cloud-badge" class="badge-cloud" title="Cloud sync status">starting...</span>
+  &middot; <a href="register.html" target="_blank" rel="noopener">Open Register page in new tab</a>
+</div>
+
+<div class="top-bar">
+  <div class="group">
+    <label>Period:</label>
+    <select id="month-sel">
+      <option value="1">January</option><option value="2">February</option>
+      <option value="3">March</option><option value="4">April</option>
+      <option value="5">May</option><option value="6">June</option>
+      <option value="7">July</option><option value="8">August</option>
+      <option value="9">September</option><option value="10">October</option>
+      <option value="11">November</option><option value="12">December</option>
+    </select>
+    <input type="number" id="year-inp" min="2020" max="2100" value="2026" />
+    <button class="btn-warn" onclick="App.applyPeriod()" title="Switch to the selected month (data per month is saved separately)">Apply Period</button>
+    <span id="period-badge" class="hint"></span>
+  </div>
+  <div class="spacer"></div>
+  <div class="group">
+    <button id="freeze-btn" class="btn-frozen" onclick="App.toggleFreeze()">Freeze Plan</button>
+    <button class="btn-secondary" onclick="App.exportExcel()">Export Excel</button>
+    <button class="btn-secondary" onclick="App.exportBackup()" title="Download a JSON snapshot of all your data">Backup JSON</button>
+    <label class="btn-secondary file-label" title="Restore a backup JSON file">
+      Restore JSON
+      <input type="file" id="restore-input" accept=".json,application/json" style="display:none" />
+    </label>
+  </div>
+</div>
+
+<div id="frozen-banner" class="frozen-banner" style="display:none">Plan is FROZEN &mdash; read-only mode. Click "Unfreeze" to make changes.</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="register">Register</button>
+  <button class="tab"        data-tab="demand">Demand</button>
+  <button class="tab"        data-tab="final">Final Plan</button>
+  <button class="tab"        data-tab="people">People</button>
+</div>
+
+<div id="register" class="panel active">
+  <div class="toolbar">
+    <button class="btn-primary"   onclick="App.saveRegister()">Save Registrations</button>
+    <button id="addPersonBtn" class="btn-secondary" onclick="App.addPersonToRegister()">+ Add Person</button>
+    <button class="btn-secondary" onclick="App.loadRegister()">Reload</button>
+    <span id="reg-status" class="status" style="display:none"></span>
+  </div>
+  <div id="reg-summary" class="reg-summary"></div>
+  <div class="table-wrap"><table id="reg-table"></table></div>
+  <div class="legend">
+    Cell values:
+    <span class="chip n">N = Day off</span>
+    <span class="chip p">P = Annual leave</span>
+    <span class="chip w">C6 / C7 / ... = Specific shift</span>
+    <span class="chip s">Sundays auto-off</span>
+    &middot; this view updates live whenever a team member saves on the Register page.
+  </div>
+</div>
+
+<div id="demand" class="panel">
+  <div class="toolbar">
+    <button class="btn-primary"   onclick="App.saveDemand()">Save Demand</button>
+    <button class="btn-secondary" onclick="App.loadDemand()">Reload</button>
+    <span id="dem-status" class="status" style="display:none"></span>
+  </div>
+  <div class="table-wrap"><table id="dem-table"></table></div>
+  <div class="legend">
+    Number of people required for each shift on each day. Sundays are treated as 0 automatically.
+  </div>
+</div>
+
+<div id="final" class="panel">
+  <div class="toolbar">
+    <button class="btn-success" onclick="App.generate(false)" title="Smart: only re-arrange dates whose registration/demand changed since last generate">Generate Plan</button>
+    <button class="btn-warn"    onclick="App.generate(true)"  title="Discard previous schedule and rebuild every date from scratch">Full Regenerate</button>
+    <span id="fin-status" class="status" style="display:none"></span>
+  </div>
+  <div id="warnings-box" style="display:none"></div>
+  <div class="table-wrap"><table id="fin-table"></table></div>
+  <div class="legend">
+    <span class="chip w">Shift</span>
+    <span class="chip n">N = Off</span>
+    <span class="chip p">P = Annual leave</span>
+    <span class="chip s">Sunday</span>
+  </div>
+  <h3>Verification report</h3>
+  <pre id="report">Click "Generate Plan" to build the schedule.</pre>
+</div>
+
+<div id="people" class="panel">
+  <div class="toolbar">
+    <button class="btn-primary"   onclick="App.savePeople()">Save People</button>
+    <button id="addPeopleBtn"     class="btn-secondary" onclick="App.addPersonToPeople()">+ Add Person</button>
+    <button id="addColumnBtn"     class="btn-secondary" onclick="App.addPeopleColumn()">+ Add Column</button>
+    <button class="btn-secondary" onclick="App.loadPeople()">Reload</button>
+    <span id="ppl-status" class="status" style="display:none"></span>
+  </div>
+  <div class="table-wrap"><table id="ppl-table"></table></div>
+  <div class="legend">
+    Master list of people. <b>ID</b> and <b>Name</b> are mandatory; add any extra columns you want to track (Department, Phone, etc.). Only ID + Name are shown in Register / Final Plan.
+  </div>
+</div>
+
+<!-- External libraries (loaded from CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+
+<!-- Optional: pre-bundled snapshot of your existing data (auto-imported on first run) -->
+<script src="data/seed.js" onerror="window.SHIFT_PLANNER_SEED=null"></script>
+
+<!-- App modules -->
+<script src="js/config.js"></script>
+<script src="js/csv.js"></script>
+<script src="js/cloud.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/scheduler.js"></script>
+<script src="js/exporter.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
