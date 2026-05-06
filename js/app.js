@@ -858,10 +858,32 @@
   let suppressLiveReload = false;
   let regRefreshPending = false;
 
+  // Coalesce cross-period register notifications: if many users register at
+  // once for a period the admin isn't viewing, we want one summary toast,
+  // not 18 in a row.
+  const crossPeriodHintBatch = new Map(); // periodKey -> Set of personIds
+  let crossPeriodHintTimer = null;
+
+  function showCrossPeriodHint() {
+    crossPeriodHintTimer = null;
+    const adminLbl = Store.periodKey(appConfig.month, appConfig.year);
+    const lines = [];
+    for (const [periodKey, ids] of crossPeriodHintBatch.entries()) {
+      const arr = [...ids];
+      const list = arr.length > 3 ? `${arr.slice(0, 3).join(", ")} +${arr.length - 3} more` : arr.join(", ");
+      lines.push(`${list} → ${periodKey}`);
+    }
+    crossPeriodHintBatch.clear();
+    status("reg-status",
+      `Team registered (you're viewing ${adminLbl}): ${lines.join("; ")}`,
+      "info");
+  }
+
   // Decide which UI piece to refresh based on which key changed.
   function applyExternalChange(k) {
     const cur = Store.currentPaths();
     const regKind = Store.classifyRegisterKey(k, appConfig.month, appConfig.year);
+    const periodMatch = k && k.match(/^period:(\d{4})-(\d{2}):/);
 
     if (k === "people") {
       // The People list changed on another browser. Refresh People AND
@@ -880,8 +902,10 @@
       loadRegister(); loadDemand(); loadFinal();
     }
     else if (regKind) {
-      // Coalesce rapid-fire row updates (one batch from many users) into
-      // a single re-render so we don't thrash the table.
+      // Current-period register change (header / per-person row / legacy
+      // single-blob). Coalesce rapid-fire row updates (one batch from many
+      // users) into a single re-render so we don't thrash the table.
+      console.debug("[live-sync] register update for current period:", k);
       if (!regRefreshPending) {
         regRefreshPending = true;
         setTimeout(() => { regRefreshPending = false; loadRegister(); }, 150);
@@ -889,7 +913,23 @@
     }
     else if (k === cur.demand) loadDemand();
     else if (k === cur.final)  loadFinal();
-    // Snapshots and other-period keys don't need a UI refresh.
+    else if (periodMatch) {
+      // A period:* key changed for some OTHER period than the one the admin
+      // is currently viewing. Refresh the period dropdown so the "saved"
+      // indicator is up to date, and surface a soft hint when team members
+      // are registering somewhere the admin isn't looking.
+      appConfig.periods = Store.listPeriods();
+      updatePeriodBadge();
+      const regRow = k.match(/^period:(\d{4})-(\d{2}):reg_row\.(.+)$/);
+      if (regRow) {
+        const otherPeriodKey = `${regRow[1]}-${regRow[2]}`;
+        const personId = regRow[3];
+        if (!crossPeriodHintBatch.has(otherPeriodKey)) crossPeriodHintBatch.set(otherPeriodKey, new Set());
+        crossPeriodHintBatch.get(otherPeriodKey).add(personId);
+        if (!crossPeriodHintTimer) crossPeriodHintTimer = setTimeout(showCrossPeriodHint, 1000);
+      }
+    }
+    // Snapshots are intentionally ignored.
   }
 
   function attachCloudLiveSync() {

@@ -18,7 +18,7 @@
  * ------------------------------------------------------------------------- */
 
 window.APP_CONFIG = {
-  SUPABASE_URL:      "https://dnkklzbcwdzmptpntutz.supabase.co/rest/v1/",   // e.g. "https://xxxxxxxxxxxxx.supabase.co"
+  SUPABASE_URL:      "https://dnkklzbcwdzmptpntutz.supabase.co",   // e.g. "https://xxxxxxxxxxxxx.supabase.co" (do NOT add /rest/v1 -- the SDK appends it)
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRua2tsemJjd2R6bXB0cG50dXR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwNTMzNzMsImV4cCI6MjA5MzYyOTM3M30.jFpkD1Yo5Bo4R_mzsPHdjm4dKLHWkFBVfCT33jfVkEM",   // e.g. "eyJhbGciOi....."
 
   // Name of the table that holds the app state (created by the SQL in README).
