@@ -34,6 +34,34 @@
   }
   function isDateHeader(s) { return /^\d+\/\d+\/\d+/.test(s); }
 
+  // ---------- echo-suppression helpers ----------
+  // Used by applyExternalChange to detect "self-echo" cloud notifications.
+  // When we ourselves just persisted something, Supabase Realtime will
+  // broadcast the same value back to us; if we re-render blindly, any
+  // in-progress UI state (clicked checkbox, focused input...) gets wiped.
+  function samePlans(a, b) {
+    a = Array.isArray(a) ? a : [];
+    b = Array.isArray(b) ? b : [];
+    if (a.length !== b.length) return false;
+    // Order matters (we render in array order), but we still want a stable
+    // structural comparison for each plan.
+    try { return JSON.stringify(a) === JSON.stringify(b); }
+    catch (_) { return false; }
+  }
+  function sameRows(a, b) {
+    a = Array.isArray(a) ? a : [];
+    b = Array.isArray(b) ? b : [];
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      const ra = a[i] || [], rb = b[i] || [];
+      if (ra.length !== rb.length) return false;
+      for (let j = 0; j < ra.length; j++) {
+        if (String(ra[j] == null ? "" : ra[j]) !== String(rb[j] == null ? "" : rb[j])) return false;
+      }
+    }
+    return true;
+  }
+
   // ---------- table rendering ----------
   // `tableIdOrEl` may be either a DOM id (string) or the <table> element
   // itself. Accepting the element lets callers render into a freshly-created
@@ -1886,9 +1914,37 @@
     else if (planKind) {
       // A plan-scoped key changed for the period the admin is viewing
       // (plans list, demand.<id>, final.<id>, or snapshots).
+      // Most of these notifications are echoes of our own writes -- when
+      // the admin edits a plan card, we save to cloud, the cloud echoes
+      // back, and we end up here. Re-rendering blindly would wipe the
+      // user's in-progress UI state (checkboxes, focused inputs, scroll
+      // position). So compare the freshly-stored value to what we already
+      // have in memory, and skip the re-render when they match.
       console.debug("[live-sync] plan update:", k, planKind);
-      if (planKind.kind === "plans" || planKind.kind === "demand") loadDemand();
-      if (planKind.kind === "plans" || planKind.kind === "final")  loadFinal();
+      if (planKind.kind === "plans") {
+        const fresh = Store.getPlans(appConfig.month, appConfig.year);
+        if (samePlans(plansData, fresh)) {
+          console.debug("[live-sync] plans unchanged (self-echo) - skip re-render");
+          return;
+        }
+        loadDemand();
+        loadFinal();
+      }
+      else if (planKind.kind === "demand") {
+        const fresh = Store.readPlanDemand(planKind.planId, appConfig.month, appConfig.year);
+        const tableId = `dem-table-${planKind.planId}`;
+        const tableEl = document.getElementById(tableId);
+        const current = tableEl ? gatherTable(tableId) : [];
+        if (sameRows(current, fresh)) {
+          console.debug("[live-sync] demand unchanged (self-echo) - skip re-render");
+          return;
+        }
+        loadDemand();
+      }
+      else if (planKind.kind === "final") {
+        // Final tables aren't editable, re-rendering is safe.
+        loadFinal();
+      }
     }
     else if (periodMatch) {
       // A period:* key changed for some OTHER period than the one the admin
