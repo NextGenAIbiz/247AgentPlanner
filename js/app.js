@@ -35,11 +35,21 @@
   function isDateHeader(s) { return /^\d+\/\d+\/\d+/.test(s); }
 
   // ---------- table rendering ----------
-  function renderTable(tableId, rows, opts = {}) {
+  // `tableIdOrEl` may be either a DOM id (string) or the <table> element
+  // itself. Accepting the element lets callers render into a freshly-created
+  // table that hasn't been attached to document yet (getElementById would
+  // miss it in that case).
+  function renderTable(tableIdOrEl, rows, opts = {}) {
     const { editable = true, colorize = false, allowDeleteRows = false,
       dateColIndex = 1, peopleMap = null, peopleGroupMap = null,
       groupNameMap = null, onDeleteRow = null } = opts;
-    const t = document.getElementById(tableId);
+    const t = (typeof tableIdOrEl === "string")
+      ? document.getElementById(tableIdOrEl)
+      : tableIdOrEl;
+    if (!t) {
+      console.warn("[shift-planner] renderTable: target not found:", tableIdOrEl);
+      return;
+    }
     t.innerHTML = "";
     if (!rows || !rows.length) {
       t.innerHTML = '<tbody><tr><td class="empty">No data yet.</td></tr></tbody>';
@@ -518,7 +528,9 @@
     wrap.appendChild(tbl);
     card.appendChild(wrap);
 
-    // Render the demand
+    // Render the demand. Pass `tbl` directly because at this point the
+    // <table> is inside `card` but `card` hasn't been appended to the
+    // document yet, so getElementById(tbl.id) would return null.
     const dates = Store.generateDates(appConfig.month, appConfig.year);
     let demand = Store.readPlanDemand(plan.id, appConfig.month, appConfig.year);
     if (!demand.length) {
@@ -526,7 +538,7 @@
       for (const code of plan.shifts || []) demand.push([code, ...new Array(dates.length).fill("0")]);
       demand.push(["Sum", ...new Array(dates.length).fill("0")]);
     }
-    renderTable(tbl.id, demand, { editable: true, allowDeleteRows: true,
+    renderTable(tbl, demand, { editable: true, allowDeleteRows: true,
       onDeleteRow: async (code) => {
         if (!code) return false;
         if (code.toLowerCase() === "sum") { alert("Cannot remove the Sum row."); return false; }
@@ -724,10 +736,11 @@
     report.textContent = 'Click "Generate" to build this plan\'s schedule.';
     card.appendChild(report);
 
-    // Render existing final rows if present
+    // Render existing final rows if present. Pass `tbl` directly because
+    // `card` isn't in the DOM yet at this point.
     const finRows = Store.readPlanFinal(plan.id, appConfig.month, appConfig.year);
     if (finRows.length) {
-      renderTable(tbl.id, finRows, {
+      renderTable(tbl, finRows, {
         editable: false, colorize: true,
         peopleMap: peopleNamesMap,
         peopleGroupMap: Store.getPeopleGroupMap(),
