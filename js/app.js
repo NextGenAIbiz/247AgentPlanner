@@ -1442,15 +1442,22 @@
       try { storedRecoveryHash = local ? JSON.parse(local) : null; } catch (_) { storedRecoveryHash = local; }
     }
 
+    console.debug("[pin-gate] stored hashes:", {
+      hasPin: !!storedPinHash,
+      hasRecovery: !!storedRecoveryHash,
+    });
+
     // ----- State machine -----
     // Stages:
-    //   "login"          -> existing user types PIN
-    //   "first-time"     -> no PIN exists yet, choose one
-    //   "forgot"         -> existing user types recovery code
-    //   "new-pin"        -> after recovery accepted, choose new PIN (with confirm)
-    //   "show-recovery"  -> show the freshly generated recovery code, force ack
-    //   "offer-recovery" -> existing user logged in but has no recovery hash;
-    //                       offer to generate one
+    //   "login"            -> existing user types PIN
+    //   "first-time"       -> no PIN exists yet, choose one
+    //   "forgot"           -> existing user types recovery code
+    //   "no-recovery-help" -> Forgot was clicked but no recovery hash exists;
+    //                          show manual reset instructions
+    //   "new-pin"          -> after recovery accepted, choose new PIN
+    //   "show-recovery"    -> show the freshly generated recovery code
+    //   "offer-recovery"   -> existing user logged in but has no recovery
+    //                          hash; offer to generate one
     let stage = storedPinHash ? "login" : "first-time";
 
     // Carry the freshly accepted PIN between stages.
@@ -1464,12 +1471,14 @@
       };
 
       function render() {
+        console.debug("[pin-gate] render stage:", stage);
         // Reset every dynamic field, then turn on what this stage needs.
         pin1.value = ""; pin2.value = ""; recIn.value = "";
         pin1.style.display = "none";
         pin2.style.display = "none";
         recIn.style.display = "none";
         recBox.style.display = "none";
+        btn.style.display = "block";
         backBtn.style.display = "none";
         backBtn.textContent = "Back to login";
         forgotLink.style.display = "inline";
@@ -1502,6 +1511,21 @@
           forgotLink.style.display = "none";
           btn.textContent = "Verify recovery code";
           setTimeout(() => recIn.focus(), 30);
+        }
+        else if (stage === "no-recovery-help") {
+          title.textContent = "No recovery code on file";
+          msgEl.innerHTML =
+            'There is no recovery code saved for this admin yet, so the PIN cannot be reset automatically.<br><br>' +
+            'To reset the PIN manually:<br>' +
+            '<b>Option 1 - Browser console:</b> press <code>F12</code>, paste this and press Enter:<br>' +
+            '<code style="display:block;padding:8px;background:#f3f4f6;border-radius:4px;font-size:11px;margin:6px 0;text-align:left">' +
+            'await Cloud.del("admin_pin_hash");<br>' +
+            'localStorage.removeItem("admin_pin_hash");<br>' +
+            'location.reload();</code>' +
+            '<b>Option 2 - Supabase:</b> open Table Editor &rarr; <code>shift_planner</code> &rarr; delete the row where <code>k = admin_pin_hash</code>, then reload this page.';
+          btn.style.display = "none";
+          backBtn.style.display = "inline-block";
+          forgotLink.style.display = "none";
         }
         else if (stage === "new-pin") {
           title.textContent = "Choose new PIN";
@@ -1625,7 +1649,7 @@
           finish();
           return;
         }
-        if (stage === "forgot") {
+        if (stage === "forgot" || stage === "no-recovery-help") {
           // User changed their mind about reset.
           stage = storedPinHash ? "login" : "first-time";
         }
@@ -1641,8 +1665,14 @@
       btn.onclick = submit;
       backBtn.onclick = back;
       forgotLink.onclick = (e) => {
-        e.preventDefault();
-        if (stage === "login") { stage = "forgot"; render(); }
+        if (e && e.preventDefault) e.preventDefault();
+        console.debug("[pin-gate] forgot clicked, stage=", stage,
+                      "hasRecovery=", !!storedRecoveryHash);
+        if (stage !== "login") return;
+        // If no recovery hash exists, route to a help screen instead of the
+        // recovery-code form (which would never accept anything).
+        stage = storedRecoveryHash ? "forgot" : "no-recovery-help";
+        render();
       };
       [pin1, pin2, recIn].forEach(el => {
         el.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
