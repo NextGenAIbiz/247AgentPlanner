@@ -478,7 +478,7 @@
     nameInp.addEventListener("change", () => {
       plan.name = nameInp.value.trim() || plan.id;
       persistPlanMeta();
-      renderFinalsContainer();
+      updateFinalCardTitle(plan);
     });
     header.appendChild(nameInp);
 
@@ -499,8 +499,12 @@
         cb.addEventListener("change", () => {
           plan.groupIds = [...groupPicker.querySelectorAll("input[type=checkbox]")]
             .filter(c => c.checked).map(c => c.value);
+          console.debug("[shift-planner] plan", plan.id, "groupIds now:", plan.groupIds);
           persistPlanMeta();
-          renderFinalsContainer();
+          // Update just the chip area of the matching Final card so we don't
+          // wipe & rebuild the whole Final container (which would lose any
+          // in-progress UI state in other Final cards).
+          updateFinalCardChips(plan);
         });
         lbl.appendChild(cb);
         const txt = document.createElement("span");
@@ -674,6 +678,43 @@
     groupsData = Store.getGroups();
     peopleNamesMap = Store.getPeopleMap();
     renderFinalsContainer();
+  }
+
+  // Update just the group-chips area of a Final card without rebuilding the
+  // whole Final container. This avoids wiping in-progress UI state in other
+  // cards (e.g. half-typed verification report scrolls).
+  function updateFinalCardChips(plan) {
+    const card = document.querySelector(`#finals-container .plan-card[data-plan-id="${CSS.escape(plan.id)}"]`);
+    if (!card) {
+      console.debug("[shift-planner] no Final card for plan", plan.id, "- doing full render");
+      renderFinalsContainer();
+      return;
+    }
+    const groupChips = card.querySelector(".plan-header .group-chips");
+    if (!groupChips) return;
+    groupChips.innerHTML = "";
+    const groupNameMap = Store.getGroupNameMap();
+    if (!plan.groupIds || plan.groupIds.length === 0) {
+      const c = document.createElement("span");
+      c.className = "chip-group empty";
+      c.textContent = "no groups";
+      groupChips.appendChild(c);
+    } else {
+      for (const gid of plan.groupIds) {
+        const c = document.createElement("span");
+        c.className = "chip-group";
+        c.textContent = groupNameMap[gid] || gid;
+        groupChips.appendChild(c);
+      }
+    }
+    console.debug("[shift-planner] updated Final chips for", plan.id, "->", plan.groupIds);
+  }
+
+  function updateFinalCardTitle(plan) {
+    const card = document.querySelector(`#finals-container .plan-card[data-plan-id="${CSS.escape(plan.id)}"]`);
+    if (!card) { renderFinalsContainer(); return; }
+    const h = card.querySelector(".plan-header h4");
+    if (h) h.textContent = plan.name || plan.id;
   }
 
   function renderFinalsContainer() {
