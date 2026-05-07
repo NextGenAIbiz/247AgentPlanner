@@ -157,11 +157,27 @@
   function isFrozen() { return !!getConfig().frozen; }
 
   // ---------- people ----------
+  // The People CSV header always starts with "ID","Name","Group" (Group is the
+  // group ID, e.g. "G1") and may be followed by any number of free-form
+  // columns the admin adds (Email, Phone, Department, ...).
   function getPeopleRows() {
     const raw = get("people");
-    if (!raw) return [["ID", "Name"]];
+    if (!raw) return [["ID", "Name", "Group"]];
     const rows = CSV.parse(raw);
-    return rows.length ? rows : [["ID", "Name"]];
+    if (!rows.length) return [["ID", "Name", "Group"]];
+    // If the stored header doesn't have a Group column, splice one in so the
+    // rest of the app can rely on column 2 being the group reference.
+    const header = rows[0];
+    const hasGroup = header.length >= 3
+      && (header[2] || "").trim().toLowerCase() === "group";
+    if (!hasGroup) {
+      header.splice(2, 0, "Group");
+      for (let i = 1; i < rows.length; i++) {
+        rows[i] = rows[i] || [];
+        rows[i].splice(2, 0, "");
+      }
+    }
+    return rows;
   }
   function setPeopleRows(rows) { set("people", CSV.serialize(rows)); }
   function getPeopleMap() {
@@ -171,6 +187,58 @@
     }
     return map;
   }
+  // ID -> groupId (or "" if unassigned)
+  function getPeopleGroupMap() {
+    const map = {};
+    for (const r of getPeopleRows().slice(1)) {
+      if (r && r[0] && r[0].trim()) map[r[0].trim()] = (r[2] || "").trim();
+    }
+    return map;
+  }
+  // Returns the IDs of every person assigned to ANY of the given groupIds.
+  function getPeopleIdsInGroups(groupIds) {
+    const wanted = new Set((groupIds || []).map(g => String(g).trim()).filter(Boolean));
+    if (wanted.size === 0) return [];
+    const out = [];
+    for (const r of getPeopleRows().slice(1)) {
+      const id = r && r[0] && String(r[0]).trim();
+      const g  = (r && r[2] || "").trim();
+      if (id && wanted.has(g)) out.push(id);
+    }
+    return out;
+  }
+
+  // ---------- groups ----------
+  // Stored as JSON array: [{id:"G1", name:"Agent Call 1"}, ...]
+  function getGroups() {
+    const raw = get("groups");
+    if (!raw) return [];
+    try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; }
+    catch (_) { return []; }
+  }
+  function setGroups(list) { set("groups", JSON.stringify(list || [])); }
+  function getGroupNameMap() {
+    const m = {};
+    for (const g of getGroups()) {
+      if (g && g.id) m[String(g.id).trim()] = String(g.name || g.id).trim();
+    }
+    return m;
+  }
+
+  // ---------- shift types ----------
+  // Stored as JSON array: [{code:"C6", desc:"6:00 shift"}, ...]
+  function getShiftTypes() {
+    const raw = get("shift_types");
+    if (!raw) return [];
+    try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; }
+    catch (_) { return []; }
+  }
+  function setShiftTypes(list) { set("shift_types", JSON.stringify(list || [])); }
+  function getShiftCodes() {
+    return getShiftTypes()
+      .map(s => s && s.code && String(s.code).trim())
+      .filter(Boolean);
+  }
 
   // ---------- per-period rows ----------
   function periodKey(month, year) { return `${year}-${String(month).padStart(2, "0")}`; }
@@ -178,16 +246,105 @@
     const p = periodKey(month, year);
     return {
       key:           p,
+      // Legacy single-blob keys (kept for backward compatibility with
+      // pre-multi-plan data; the new model uses plan-scoped keys below).
       demand:        `period:${p}:demand`,
       register:      `period:${p}:register`,
       final:         `period:${p}:final`,
       demand_snap:   `period:${p}:demand_snapshot`,
       register_snap: `period:${p}:register_snapshot`,
+      // Multi-plan keys
+      plans:         `period:${p}:plans`,
     };
   }
   function currentPaths() {
     const c = getConfig();
     return periodPaths(c.month, c.year);
+  }
+
+  // ---------- plans (per period) ----------
+  // A "plan" is a slice of the schedule for a subset of groups + a subset of
+  // shifts. Each period can hold many plans. Stored as JSON array under
+  // `period:<YYYY-MM>:plans`:
+  //   [{ id:"PLAN1", name:"Morning team", groupIds:["G1","G2"], shifts:["C6","C7"] }, ...]
+  function getPlans(month, year) {
+    const cfg = (month && year) ? { month, year } : getConfig();
+    const raw = get(`period:${periodKey(cfg.month, cfg.year)}:plans`);
+    if (!raw) return [];
+    try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; }
+    catch (_) { return []; }
+  }
+  function setPlans(plans, opts) {
+    opts = opts || {};
+    const cfg = (opts.month && opts.year) ? { month: opts.month, year: opts.year } : getConfig();
+    set(`period:${periodKey(cfg.month, cfg.year)}:plans`, JSON.stringify(plans || []));
+  }
+  function planDemandKey(planId, month, year) {
+    const cfg = (month && year) ? { month, year } : getConfig();
+    return `period:${periodKey(cfg.month, cfg.year)}:demand.${planId}`;
+  }
+  function planFinalKey(planId, month, year) {
+    const cfg = (month && year) ? { month, year } : getConfig();
+    return `period:${periodKey(cfg.month, cfg.year)}:final.${planId}`;
+  }
+  function planDemandSnapKey(planId, month, year) {
+    const cfg = (month && year) ? { month, year } : getConfig();
+    return `period:${periodKey(cfg.month, cfg.year)}:demand_snapshot.${planId}`;
+  }
+  function planRegisterSnapKey(planId, month, year) {
+    const cfg = (month && year) ? { month, year } : getConfig();
+    return `period:${periodKey(cfg.month, cfg.year)}:register_snapshot.${planId}`;
+  }
+  function readPlanDemand(planId, month, year)   { return readRows(planDemandKey(planId, month, year)); }
+  function writePlanDemand(planId, rows, opts)   {
+    opts = opts || {};
+    const cfg = (opts.month && opts.year) ? { month: opts.month, year: opts.year } : getConfig();
+    writeRows(planDemandKey(planId, cfg.month, cfg.year), rows);
+  }
+  function readPlanFinal(planId, month, year)    { return readRows(planFinalKey(planId, month, year)); }
+  function writePlanFinal(planId, rows, opts)    {
+    opts = opts || {};
+    const cfg = (opts.month && opts.year) ? { month: opts.month, year: opts.year } : getConfig();
+    writeRows(planFinalKey(planId, cfg.month, cfg.year), rows);
+  }
+  function readPlanSnapshots(planId, month, year) {
+    return {
+      demand:   readRows(planDemandSnapKey(planId, month, year)),
+      register: readRows(planRegisterSnapKey(planId, month, year)),
+    };
+  }
+  function writePlanSnapshots(planId, demandRows, registerRows, opts) {
+    opts = opts || {};
+    const cfg = (opts.month && opts.year) ? { month: opts.month, year: opts.year } : getConfig();
+    writeRows(planDemandSnapKey(planId, cfg.month, cfg.year), demandRows);
+    writeRows(planRegisterSnapKey(planId, cfg.month, cfg.year), registerRows);
+  }
+  // Drop ALL keys for a plan (demand, final, snapshots). Used when a plan is
+  // deleted from the Demand tab.
+  function deletePlanData(planId, opts) {
+    opts = opts || {};
+    const cfg = (opts.month && opts.year) ? { month: opts.month, year: opts.year } : getConfig();
+    set(planDemandKey(planId, cfg.month, cfg.year), null);
+    set(planFinalKey(planId, cfg.month, cfg.year), null);
+    set(planDemandSnapKey(planId, cfg.month, cfg.year), null);
+    set(planRegisterSnapKey(planId, cfg.month, cfg.year), null);
+  }
+  // Returns "demand" | "final" | "demand_snap" | "register_snap" | null and the
+  // planId, given an arbitrary cloud key. Used by live-sync routing.
+  function classifyPlanKey(key, month, year) {
+    const cfg = (month && year) ? { month, year } : getConfig();
+    const pk = periodKey(cfg.month, cfg.year);
+    let m;
+    if ((m = key.match(new RegExp("^period:" + pk + ":demand\\.(.+)$"))))
+      return { kind: "demand", planId: m[1] };
+    if ((m = key.match(new RegExp("^period:" + pk + ":final\\.(.+)$"))))
+      return { kind: "final", planId: m[1] };
+    if ((m = key.match(new RegExp("^period:" + pk + ":demand_snapshot\\.(.+)$"))))
+      return { kind: "demand_snap", planId: m[1] };
+    if ((m = key.match(new RegExp("^period:" + pk + ":register_snapshot\\.(.+)$"))))
+      return { kind: "register_snap", planId: m[1] };
+    if (key === `period:${pk}:plans`) return { kind: "plans", planId: null };
+    return null;
   }
 
   function readRows(key) {
@@ -606,12 +763,27 @@
 
     // people
     getPeopleRows, setPeopleRows, getPeopleMap,
+    getPeopleGroupMap, getPeopleIdsInGroups,
+
+    // groups
+    getGroups, setGroups, getGroupNameMap,
+
+    // shift types
+    getShiftTypes, setShiftTypes, getShiftCodes,
 
     // periods
     periodKey, periodPaths, currentPaths,
     readRows, writeRows,
     periodExists, listPeriods,
     generateDates, seedPeriod,
+
+    // plans (multi-plan model)
+    getPlans, setPlans,
+    planDemandKey, planFinalKey, planDemandSnapKey, planRegisterSnapKey,
+    readPlanDemand, writePlanDemand,
+    readPlanFinal,  writePlanFinal,
+    readPlanSnapshots, writePlanSnapshots,
+    deletePlanData, classifyPlanKey,
 
     // register (per-person, race-safe)
     readRegisterRows, readRegisterRow,

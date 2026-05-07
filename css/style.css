@@ -50,8 +50,10 @@ body.frozen #addPeopleBtn,
 body.frozen #addColumnBtn,
 body.frozen .top-bar .btn-warn { display: none; }
 body.frozen #reg-table input.cell,
-body.frozen #dem-table input.cell,
-body.frozen #ppl-table input.cell { background: #f9fafb; cursor: not-allowed; }
+body.frozen #ppl-table input.cell,
+body.frozen #grp-table input.cell,
+body.frozen #sft-table input.cell,
+body.frozen .plan-card input.cell { background: #f9fafb; cursor: not-allowed; }
 body.frozen td.col-action,
 body.frozen th.col-action { display: none; }
 
@@ -120,8 +122,14 @@ th.col-name, td.col-name {
   line-height: 1.2;
 }
 th.col-name { z-index: 3; text-align: center; }
-td.col-name .person-id   { font-weight: 700; display: block; color: #111827; }
-td.col-name .person-name { font-weight: 400; display: block; color: #6b7280; font-size: 10px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+td.col-name .person-id    { font-weight: 700; display: block; color: #111827; }
+td.col-name .person-name  { font-weight: 400; display: block; color: #6b7280; font-size: 10px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+td.col-name .person-group {
+  display: inline-block; margin-top: 2px; padding: 0 6px; border-radius: 999px;
+  font-size: 9px; font-weight: 600; color: #3730a3; background: #eef2ff;
+  border: 1px solid #c7d2fe; white-space: nowrap; max-width: 110px;
+  overflow: hidden; text-overflow: ellipsis;
+}
 th.col-action, td.col-action { min-width: 30px; padding: 0; background: white; }
 td.col-action .btn-danger { font-size: 14px; line-height: 1; padding: 4px 6px; border-radius: 4px; }
 
@@ -233,6 +241,37 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: #374151; }
 .pin-card .hint a { color: #2563eb; text-decoration: none; }
 .pin-card .hint a:hover { text-decoration: underline; }
 .pin-error { color: #dc2626; font-size: 13px; margin-top: 8px; }
+.pin-card #pin-input-2,
+.pin-card #recovery-input { margin-top: 0; }
+
+.recovery-display {
+  margin: 6px 0 12px;
+  background: #fffbeb; border: 1px solid #fde68a;
+  border-radius: 8px; padding: 14px;
+  text-align: left; font-size: 12px; color: #78350f;
+}
+.recovery-display .recovery-warn {
+  margin-bottom: 10px; line-height: 1.5;
+}
+.recovery-display code {
+  display: block; padding: 12px; margin: 8px 0;
+  background: white; border: 1px dashed #fbbf24; border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 16px; letter-spacing: 1px; color: #111827;
+  text-align: center; user-select: all;
+}
+.recovery-display .recovery-actions {
+  display: flex; gap: 8px; margin: 8px 0;
+}
+.recovery-display .recovery-actions button {
+  flex: 1; padding: 6px 10px; font-size: 12px;
+}
+.recovery-display .recovery-confirm {
+  display: flex; gap: 6px; align-items: flex-start;
+  font-size: 12px; color: #78350f; cursor: pointer;
+  margin-top: 8px; line-height: 1.4;
+}
+.recovery-display .recovery-confirm input { margin-top: 2px; cursor: pointer; }
 
 /* ---------- Register page (end-user) ---------- */
 .register-page {
@@ -285,3 +324,94 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: #374151; }
   vertical-align: middle; white-space: nowrap;
 }
 .reg-when-missing { background: #fee2e2; color: #991b1b; }
+
+/* ---------- Multi-plan layout (Demand + Final tabs) ---------- */
+.plans-container { display: flex; flex-direction: column; gap: 16px; }
+.empty-hint {
+  padding: 32px; text-align: center; color: #6b7280;
+  background: #f9fafb; border: 1px dashed #d1d5db; border-radius: 8px;
+  font-size: 13px;
+}
+.plan-card {
+  background: white; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 14px 16px;
+}
+.plan-card .plan-header {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid #f3f4f6;
+}
+.plan-card .plan-header h4 {
+  margin: 0; font-size: 15px; color: #111827; font-weight: 700;
+}
+.plan-card .plan-header input[type=text] {
+  border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px;
+  font-size: 13px; font-family: inherit; min-width: 180px;
+}
+.plan-card .plan-header .group-chips {
+  display: inline-flex; gap: 4px; flex-wrap: wrap;
+}
+.plan-card .plan-header .group-chips .chip-group {
+  background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe;
+  padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
+}
+.plan-card .plan-header .group-chips .chip-group.empty {
+  background: #fef2f2; color: #991b1b; border-color: #fecaca;
+}
+.plan-card .plan-header .spacer { flex: 1; }
+.plan-card .plan-toolbar {
+  display: flex; gap: 8px; margin: 8px 0; align-items: center; flex-wrap: wrap;
+}
+.plan-card .plan-toolbar .status { margin-left: auto; }
+.plan-card .verification {
+  margin-top: 12px;
+  background: #0f172a; color: #e2e8f0;
+  border-radius: 6px; padding: 12px;
+  font-size: 11px; line-height: 1.5; max-height: 280px;
+  overflow: auto; white-space: pre; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* ---------- Setting tab (3 sections) ---------- */
+.setting-section { margin-bottom: 24px; }
+.setting-section h3 {
+  margin: 0 0 8px; font-size: 15px; color: #111827; font-weight: 700;
+  padding-bottom: 6px; border-bottom: 1px solid #e5e7eb;
+}
+#grp-table, #sft-table {
+  /* Smaller tables -- groups and shift types are short lists. */
+}
+#grp-table th, #grp-table td,
+#sft-table th, #sft-table td { min-width: 120px; }
+#grp-table td.col-name, #sft-table td.col-name { min-width: 80px; }
+input.cell.text-cell { text-align: left; padding: 6px 10px; }
+
+/* Group dropdown inside the People table */
+select.group-select {
+  width: 100%; border: none; background: transparent;
+  font-size: 12px; padding: 6px 4px; font-family: inherit;
+  text-align: center; text-align-last: center;
+}
+select.group-select:focus { outline: 2px solid #2563eb; background: white; }
+
+/* Multi-group picker (used in plan card) */
+.group-picker {
+  display: inline-flex; gap: 6px; flex-wrap: wrap;
+  border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 8px;
+  background: white;
+}
+.group-picker label {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; cursor: pointer;
+}
+.group-picker input[type=checkbox] { margin: 0; cursor: pointer; }
+
+body.frozen #grp-table input.cell,
+body.frozen #sft-table input.cell { background: #f9fafb; cursor: not-allowed; }
+body.frozen .plan-card .plan-toolbar .btn-primary,
+body.frozen .plan-card .plan-toolbar .btn-success,
+body.frozen .plan-card .plan-toolbar .btn-warn,
+body.frozen .plan-card .plan-toolbar .btn-danger,
+body.frozen .plan-card .plan-header .btn-danger { display: none; }
+body.frozen .plan-card .plan-header input[type=text],
+body.frozen .plan-card .group-picker input[type=checkbox] {
+  pointer-events: none; background: #f9fafb; cursor: not-allowed;
+}

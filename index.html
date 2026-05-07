@@ -11,15 +11,45 @@
 <!-- ------ PIN gate (covers the page until the right PIN is entered) ------ -->
 <div id="pin-gate" class="pin-gate">
   <div class="pin-card">
-    <h2>Admin access</h2>
+    <h2 id="pin-title">Admin access</h2>
     <p id="pin-msg">Enter the admin PIN to load the planner.</p>
-    <input id="pin-input" type="password" inputmode="numeric" autocomplete="off"
-           placeholder="PIN" maxlength="20" />
-    <button id="pin-btn" class="btn-primary">Unlock</button>
+
+    <!-- Stage: login / first-time / new-pin -->
+    <input id="pin-input"  type="password" inputmode="text" autocomplete="off"
+           placeholder="PIN" maxlength="40" />
+    <input id="pin-input-2" type="password" autocomplete="off" maxlength="40"
+           placeholder="Confirm new PIN" style="display:none" />
+
+    <!-- Stage: forgot (recovery code entry) -->
+    <input id="recovery-input" type="text" autocomplete="off" maxlength="64"
+           placeholder="aaaa-bbbb-cccc-dddd" style="display:none" />
+
+    <!-- Stage: show-recovery (display the freshly generated code) -->
+    <div id="recovery-display" class="recovery-display" style="display:none">
+      <div class="recovery-warn">
+        Save this <b>recovery code</b> somewhere safe.<br>
+        It is shown <b>only once</b>. You will need it to reset your PIN.
+      </div>
+      <code id="recovery-code-text"></code>
+      <div class="recovery-actions">
+        <button id="recovery-copy-btn"     type="button" class="btn-secondary">Copy</button>
+        <button id="recovery-download-btn" type="button" class="btn-secondary">Download .txt</button>
+      </div>
+      <label class="recovery-confirm">
+        <input id="recovery-ack" type="checkbox" />
+        I have saved this recovery code in a safe place.
+      </label>
+    </div>
+
+    <button id="pin-btn"      class="btn-primary">Unlock</button>
+    <button id="pin-back-btn" class="btn-secondary" style="display:none; margin-top:6px">Back to login</button>
+
     <p id="pin-error" class="pin-error" style="display:none"></p>
+
     <p class="hint">
-      Are you a team member? Go to the
-      <a href="register.html">Register page</a> instead.
+      <a id="forgot-pin-link" href="#" style="color:#dc2626">Forgot PIN?</a>
+      &middot; Team member? Go to the
+      <a href="register.html">Register page</a>.
     </p>
   </div>
 </div>
@@ -64,7 +94,7 @@
   <button class="tab active" data-tab="register">Register</button>
   <button class="tab"        data-tab="demand">Demand</button>
   <button class="tab"        data-tab="final">Final Plan</button>
-  <button class="tab"        data-tab="people">People</button>
+  <button class="tab"        data-tab="setting">Setting</button>
 </div>
 
 <div id="register" class="panel active">
@@ -88,45 +118,77 @@
 
 <div id="demand" class="panel">
   <div class="toolbar">
-    <button class="btn-primary"   onclick="App.saveDemand()">Save Demand</button>
+    <button class="btn-primary" onclick="App.addPlan()">+ Add Plan</button>
     <button class="btn-secondary" onclick="App.loadDemand()">Reload</button>
     <span id="dem-status" class="status" style="display:none"></span>
   </div>
-  <div class="table-wrap"><table id="dem-table"></table></div>
+  <div id="plans-container" class="plans-container">
+    <div class="empty-hint">No plans yet for this period. Click <b>+ Add Plan</b> to create one. Each plan covers a set of groups + a set of shift types.</div>
+  </div>
   <div class="legend">
-    Number of people required for each shift on each day. Sundays are treated as 0 automatically.
+    Each plan defines how many people are needed for each shift on each day, for the groups it targets. Sundays are treated as 0 automatically.
   </div>
 </div>
 
 <div id="final" class="panel">
   <div class="toolbar">
-    <button class="btn-success" onclick="App.generate(false)" title="Smart: only re-arrange dates whose registration/demand changed since last generate">Generate Plan</button>
-    <button class="btn-warn"    onclick="App.generate(true)"  title="Discard previous schedule and rebuild every date from scratch">Full Regenerate</button>
+    <button class="btn-success" onclick="App.generateAll(false)" title="Smart: only re-arrange dates whose registration/demand changed since last generate, for every plan">Generate All Plans</button>
+    <button class="btn-warn"    onclick="App.generateAll(true)"  title="Discard all previous finals and rebuild every plan from scratch">Full Regenerate All</button>
     <span id="fin-status" class="status" style="display:none"></span>
   </div>
-  <div id="warnings-box" style="display:none"></div>
-  <div class="table-wrap"><table id="fin-table"></table></div>
+  <div id="finals-container" class="plans-container">
+    <div class="empty-hint">No plans configured. Add a plan in the Demand tab first.</div>
+  </div>
   <div class="legend">
     <span class="chip w">Shift</span>
     <span class="chip n">N = Off</span>
     <span class="chip p">P = Annual leave</span>
     <span class="chip s">Sunday</span>
   </div>
-  <h3>Verification report</h3>
-  <pre id="report">Click "Generate Plan" to build the schedule.</pre>
 </div>
 
-<div id="people" class="panel">
-  <div class="toolbar">
-    <button class="btn-primary"   onclick="App.savePeople()">Save People</button>
-    <button id="addPeopleBtn"     class="btn-secondary" onclick="App.addPersonToPeople()">+ Add Person</button>
-    <button id="addColumnBtn"     class="btn-secondary" onclick="App.addPeopleColumn()">+ Add Column</button>
-    <button class="btn-secondary" onclick="App.loadPeople()">Reload</button>
-    <span id="ppl-status" class="status" style="display:none"></span>
+<div id="setting" class="panel">
+  <div class="setting-section">
+    <h3>People</h3>
+    <div class="toolbar">
+      <button class="btn-primary"   onclick="App.savePeople()">Save People</button>
+      <button id="addPeopleBtn"     class="btn-secondary" onclick="App.addPersonToPeople()">+ Add Person</button>
+      <button id="addColumnBtn"     class="btn-secondary" onclick="App.addPeopleColumn()">+ Add Column</button>
+      <button class="btn-secondary" onclick="App.loadPeople()">Reload</button>
+      <span id="ppl-status" class="status" style="display:none"></span>
+    </div>
+    <div class="table-wrap"><table id="ppl-table"></table></div>
+    <div class="legend">
+      Master list of people. <b>ID</b>, <b>Name</b> and <b>Group</b> are mandatory (Group must be one of the groups defined below). Add any extra columns (Email, Phone, etc.) to keep alongside.
+    </div>
   </div>
-  <div class="table-wrap"><table id="ppl-table"></table></div>
-  <div class="legend">
-    Master list of people. <b>ID</b> and <b>Name</b> are mandatory; add any extra columns you want to track (Department, Phone, etc.). Only ID + Name are shown in Register / Final Plan.
+
+  <div class="setting-section">
+    <h3>Groups</h3>
+    <div class="toolbar">
+      <button class="btn-primary"   onclick="App.saveGroups()">Save Groups</button>
+      <button class="btn-secondary" onclick="App.addGroup()">+ Add Group</button>
+      <button class="btn-secondary" onclick="App.loadGroups()">Reload</button>
+      <span id="grp-status" class="status" style="display:none"></span>
+    </div>
+    <div class="table-wrap"><table id="grp-table"></table></div>
+    <div class="legend">
+      Groups slice the workforce into teams (e.g. "Agent Call 1", "Agent Call 2"). Each plan in the Demand tab targets one or more groups.
+    </div>
+  </div>
+
+  <div class="setting-section">
+    <h3>Shift Types</h3>
+    <div class="toolbar">
+      <button class="btn-primary"   onclick="App.saveShiftTypes()">Save Shift Types</button>
+      <button class="btn-secondary" onclick="App.addShiftType()">+ Add Shift</button>
+      <button class="btn-secondary" onclick="App.loadShiftTypes()">Reload</button>
+      <span id="sft-status" class="status" style="display:none"></span>
+    </div>
+    <div class="table-wrap"><table id="sft-table"></table></div>
+    <div class="legend">
+      All shift codes the team uses (e.g. <b>C6</b>, <b>C7</b>, <b>C730</b>). When you add a new plan in the Demand tab, every shift listed here appears as a row by default; remove the rows that don't apply to that plan.
+    </div>
   </div>
 </div>
 

@@ -12,7 +12,6 @@
   let dates = [];
   let myHeader = null;       // the period's date header (just for layout)
   let myRow = null;          // the user's own row [id, ...values]
-  let finRows = null;        // current Final.csv rows (read-only)
   let myId = null;
 
   // Persist the user's last-used name in the browser so they don't have to
@@ -111,11 +110,6 @@
     myRow = r.row;
   }
 
-  function loadFinalRows() {
-    const paths = Store.periodPaths(appConfig.month, appConfig.year);
-    finRows = Store.readRows(paths.final);
-  }
-
   // ---------- Render the user's single row ----------
   function renderMyRow() {
     const area = document.getElementById("row-area");
@@ -124,7 +118,6 @@
       area.className = "register-empty";
       area.textContent = "Pick your name to begin.";
       tbar.style.display = "none";
-      document.getElementById("final-card").style.display = "none";
       return;
     }
 
@@ -179,52 +172,12 @@
 
     tbar.style.display = appConfig.frozen ? "none" : "flex";
     if (appConfig.frozen) status("Plan is frozen \u2014 ask the admin to unfreeze.", "warn");
-
-    renderFinalForMe();
   }
 
   // Returns the user's row as [id, ...dateValues]
   function gatherMyRow() {
     const inputs = document.querySelectorAll("#row-area input.cell");
     return [myId, ...[...inputs].map(i => i.value.trim())];
-  }
-
-  function renderFinalForMe() {
-    const card = document.getElementById("final-card");
-    const slot = document.getElementById("final-row");
-    if (!myId || !finRows || !finRows.length) {
-      card.style.display = "none";
-      return;
-    }
-    const row = finRows.slice(1).find(r => (r[0] || "").trim() === myId);
-    const headerDates = (finRows[0] || []).slice(1).filter(Boolean);
-    if (!row || !headerDates.length) {
-      card.style.display = "block";
-      slot.innerHTML = '<span class="none">No plan generated yet for this period.</span>';
-      return;
-    }
-    card.style.display = "block";
-    let html = '<div class="table-wrap"><table>';
-    html += "<thead><tr>";
-    headerDates.forEach(h => {
-      const dow = dayOfWeek(h);
-      const cls = dow === 0 ? "day-header sun" : "day-header";
-      const short = h.replace(/\/\d{4}$/, "");
-      html += `<th class="${cls}">${short}<br><small style="font-weight:400;opacity:0.7">${DOW[dow]||""}</small></th>`;
-    });
-    html += "</tr></thead><tbody><tr>";
-    headerDates.forEach((h, i) => {
-      const dow = dayOfWeek(h);
-      const v = (row[i + 1] || "").trim();
-      let cls = "shift-empty";
-      if (v === "N") cls = "shift-N";
-      else if (v === "P") cls = "shift-P";
-      else if (v) cls = "shift-work";
-      else if (dow === 0) cls = "col-sun";
-      html += `<td class="${cls}">${v || "&nbsp;"}</td>`;
-    });
-    html += "</tr></tbody></table></div>";
-    slot.innerHTML = html;
   }
 
   // ---------- Save / Reload ----------
@@ -245,15 +198,13 @@
 
   function reload() {
     loadMyRow();
-    loadFinalRows();
     renderMyRow();
     status("Reloaded.", "info");
   }
 
   // ---------- Live updates (cloud + cross-tab) ----------
   function applyExternalChange(k) {
-    const finalKey = `period:${Store.periodKey(appConfig.month, appConfig.year)}:final`;
-    const regKind  = Store.classifyRegisterKey(k, appConfig.month, appConfig.year);
+    const regKind = Store.classifyRegisterKey(k, appConfig.month, appConfig.year);
 
     if (k === "people") {
       // Admin renamed/added/removed someone on another device. Refresh the
@@ -282,10 +233,6 @@
       }
     }
     // Other people's row updates (regKind === "row:<otherId>") -- ignored.
-    else if (k === finalKey) {
-      loadFinalRows();
-      renderFinalForMe();
-    }
   }
 
   function attachCloudLiveSync() {
@@ -322,7 +269,6 @@
 
     refreshPeriodInfo();
     fillNameDropdown();
-    loadFinalRows();
 
     // Restore last name
     const sel = document.getElementById("name-sel");
