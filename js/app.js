@@ -308,16 +308,38 @@
 
   function addPlan() {
     if (Store.isFrozen()) return frozenAlert();
-    const name = (prompt("Plan name (e.g. \"Agent Call 1\"):", `Plan ${(plansData || []).length + 1}`) || "").trim();
-    if (!name) return;
+
+    // Re-pull from storage so we see the latest saved values, even if the
+    // user navigated away from the Setting tab without saving (in which case
+    // we want to validate against what's persisted, not stale UI state).
+    groupsData     = Store.getGroups();
+    shiftTypesData = Store.getShiftTypes();
+    plansData      = Store.getPlans(appConfig.month, appConfig.year);
+
+    console.debug("[addPlan] groups=", groupsData.length,
+                  "shiftTypes=", shiftTypesData.length,
+                  "plans=", plansData.length);
+
     if (!groupsData || groupsData.length === 0) {
-      alert("Add at least one Group in the Setting tab first.");
+      alert(
+        "No groups defined yet.\n\n" +
+        "Go to the Setting tab \u2192 Groups \u2192 click \"+ Add Group\", " +
+        "then click \"Save Groups\" before adding a plan."
+      );
       return;
     }
     if (!shiftTypesData || shiftTypesData.length === 0) {
-      alert("Add at least one Shift Type in the Setting tab first.");
+      alert(
+        "No shift types defined yet.\n\n" +
+        "Go to the Setting tab \u2192 Shift Types \u2192 click \"+ Add Shift\", " +
+        "then click \"Save Shift Types\" before adding a plan."
+      );
       return;
     }
+
+    const name = (prompt("Plan name (e.g. \"Agent Call 1\"):", `Plan ${plansData.length + 1}`) || "").trim();
+    if (!name) return;
+
     // New plan defaults to: no groups (admin picks via checkboxes), all shifts.
     const newPlan = {
       id:       uniquePlanId("PLAN"),
@@ -327,14 +349,18 @@
     };
     plansData.push(newPlan);
     Store.setPlans(plansData, { month: appConfig.month, year: appConfig.year });
+
     // Seed an empty demand table for this plan with all shifts.
     const dates = Store.generateDates(appConfig.month, appConfig.year);
     const demand = [["Plan", ...dates]];
     for (const s of newPlan.shifts) demand.push([s, ...new Array(dates.length).fill("0")]);
     demand.push(["Sum", ...new Array(dates.length).fill("0")]);
     Store.writePlanDemand(newPlan.id, demand, { month: appConfig.month, year: appConfig.year });
+
+    console.debug("[addPlan] created plan:", newPlan);
     renderPlansContainer();
     renderFinalsContainer();
+    status("dem-status", `Plan "${name}" added. Tick its groups and adjust the demand below.`, "success");
   }
 
   function deletePlan(planId) {
@@ -358,7 +384,23 @@
     if (!box) return;
     box.innerHTML = "";
     if (!plansData || plansData.length === 0) {
-      box.innerHTML = '<div class="empty-hint">No plans yet for this period. Click <b>+ Add Plan</b> to create one. Each plan covers a set of groups + a set of shift types.</div>';
+      const groups = Store.getGroups();
+      const shifts = Store.getShiftTypes();
+      const missing = [];
+      if (groups.length === 0) missing.push("<b>Groups</b>");
+      if (shifts.length === 0) missing.push("<b>Shift Types</b>");
+
+      let html = '<div class="empty-hint">No plans yet for this period.';
+      if (missing.length) {
+        html += '<br><br>Before adding a plan, go to the <b>Setting</b> tab and create ' +
+                missing.join(" and ") +
+                ' (don\'t forget to click <b>Save</b> after adding rows).';
+      } else {
+        html += ' Click <b>+ Add Plan</b> above to create one. ' +
+                'Each plan covers a set of groups + a set of shift types.';
+      }
+      html += '</div>';
+      box.innerHTML = html;
       return;
     }
     plansData.forEach(p => box.appendChild(renderPlanCard(p)));
