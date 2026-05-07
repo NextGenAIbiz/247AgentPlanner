@@ -308,7 +308,13 @@
 
   function addPlan() {
     if (Store.isFrozen()) return frozenAlert();
-
+    try { return _addPlanInner(); }
+    catch (e) {
+      console.error("[shift-planner] addPlan failed:", e);
+      alert("Could not add plan. See browser console for details.\n\n" + (e.message || e));
+    }
+  }
+  function _addPlanInner() {
     // Re-pull from storage so we see the latest saved values, even if the
     // user navigated away from the Setting tab without saving (in which case
     // we want to validate against what's persisted, not stale UI state).
@@ -316,7 +322,7 @@
     shiftTypesData = Store.getShiftTypes();
     plansData      = Store.getPlans(appConfig.month, appConfig.year);
 
-    console.debug("[addPlan] groups=", groupsData.length,
+    console.debug("[shift-planner] addPlan groups=", groupsData.length,
                   "shiftTypes=", shiftTypesData.length,
                   "plans=", plansData.length);
 
@@ -357,7 +363,7 @@
     demand.push(["Sum", ...new Array(dates.length).fill("0")]);
     Store.writePlanDemand(newPlan.id, demand, { month: appConfig.month, year: appConfig.year });
 
-    console.debug("[addPlan] created plan:", newPlan);
+    console.debug("[shift-planner] addPlan created:", newPlan);
     renderPlansContainer();
     renderFinalsContainer();
     status("dem-status", `Plan "${name}" added. Tick its groups and adjust the demand below.`, "success");
@@ -382,6 +388,8 @@
   function renderPlansContainer() {
     const box = document.getElementById("plans-container");
     if (!box) return;
+    // Defensive: in pathological boot orderings plansData may not yet be set.
+    if (!Array.isArray(plansData)) plansData = Store.getPlans(appConfig.month, appConfig.year);
     box.innerHTML = "";
     if (!plansData || plansData.length === 0) {
       const groups = Store.getGroups();
@@ -407,6 +415,17 @@
   }
 
   function renderPlanCard(plan) {
+    if (!plan || typeof plan !== "object") {
+      console.warn("[shift-planner] renderPlanCard called with invalid plan:", plan);
+      return document.createElement("div");
+    }
+    // Defensive: make sure all the arrays we read from below exist, even if
+    // the persisted JSON was somehow malformed.
+    plan.groupIds = Array.isArray(plan.groupIds) ? plan.groupIds : [];
+    plan.shifts   = Array.isArray(plan.shifts)   ? plan.shifts   : [];
+    if (!Array.isArray(groupsData))     groupsData     = Store.getGroups();
+    if (!Array.isArray(shiftTypesData)) shiftTypesData = Store.getShiftTypes();
+
     const card = document.createElement("div");
     card.className = "plan-card";
     card.dataset.planId = plan.id;
@@ -620,6 +639,7 @@
   function renderFinalsContainer() {
     const box = document.getElementById("finals-container");
     if (!box) return;
+    if (!Array.isArray(plansData)) plansData = Store.getPlans(appConfig.month, appConfig.year);
     box.innerHTML = "";
     if (!plansData || plansData.length === 0) {
       box.innerHTML = '<div class="empty-hint">No plans configured. Add a plan in the Demand tab first.</div>';
