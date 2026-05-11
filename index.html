@@ -187,6 +187,25 @@
     <div class="table-wrap"><table id="sft-table"></table></div>
     <div class="legend">
       All shift codes the team uses (e.g. <b>C6</b>, <b>C7</b>, <b>C730</b>). When you add a new plan in the Demand tab, every shift listed here appears as a row by default; remove the rows that don't apply to that plan.
+      <br><br>
+      <b>Monthly Cap</b>: max times this shift can be assigned to one person in a month (blank = no cap). Example: <code>7</code> for C13/C14, <code>5</code> for C22.
+      <br>
+      <b>Forbid Next Day</b>: comma-separated codes that CANNOT be worked the day after this shift; carries across month boundaries too. Use <code>*</code> to force <b>N</b> (rest) the next day (good for late/heavy shifts such as <code>C22</code>). Example: for C13/C14 enter <code>C6,C10</code>; for C22 enter <code>*</code>.
+    </div>
+  </div>
+
+  <div class="setting-section">
+    <h3>Scheduling Rules</h3>
+    <div class="toolbar">
+      <label for="max-workdays-inp" style="font-weight:600">Max workdays per person / month:</label>
+      <input id="max-workdays-inp" type="number" min="1" max="31" step="1"
+             placeholder="(no cap)" style="width:90px" />
+      <button class="btn-primary"   onclick="App.saveSchedulingRules()">Save Rules</button>
+      <button class="btn-secondary" onclick="App.loadSchedulingRules()">Reload</button>
+      <span id="rules-status" class="status" style="display:none"></span>
+    </div>
+    <div class="legend">
+      Global cap on how many days each person can be assigned to a real shift (anything other than <b>N</b> or <b>P</b>) within a single month. Leave blank for no cap. The scheduler honors registrations first, then tries to keep every person under this number.
     </div>
   </div>
 </div>

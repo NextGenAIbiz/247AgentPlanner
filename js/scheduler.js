@@ -4,10 +4,20 @@
      demandRows
      registerRows
    Optional:
-     prevRegisterSnapRows  (snapshot taken after last successful generate)
+     prevRegisterSnapRows   (snapshot taken after last successful generate)
      prevDemandSnapRows
-     prevFinalRows         (the previous Final.csv contents)
-     forceFull             (boolean, default false)
+     prevFinalRows          (the previous Final.csv contents)
+     forceFull              (boolean, default false)
+     shiftMeta              ({ code -> {monthlyCap, forbidNextDay: [codes]} })
+                            -- per-shift constraints. forbidNextDay may
+                            contain "*" meaning "force N the day after".
+     maxWorkdaysPerMonth    (number | null) -- cap per person per month
+                            on non-N/non-P days.
+     prevDayShifts          ({ personId -> shift_code }) -- the shift each
+                            person worked on the LAST DAY of the previous
+                            month, used to enforce forbidNextDay across
+                            the month boundary (e.g. C22 on Jun 30 ->
+                            force N on Jul 1).
 
    Returns: {
      ok, rows, report, warnings, locked_dates, dirty_dates, mode
@@ -20,6 +30,12 @@
      4. Sundays: nobody works.
      5. No back-to-back N for the same person (best effort).
      6. N = day off (rest), P = annual leave; P does NOT trigger consecutive-N.
+     7. (Admin-configurable) Per-shift monthly caps from shiftMeta.
+     8. (Admin-configurable) After certain shifts the next day's shift is
+        restricted -- forbidNextDay list, applied within month AND across
+        month boundaries via prevDayShifts.
+     9. (Admin-configurable) Hard cap on workdays per person per month
+        (maxWorkdaysPerMonth).
 */
 (function (root) {
   const OFF_CODES   = new Set(["N", "P"]);
@@ -141,11 +157,44 @@
       prevDemandSnapRows   = null,
       prevFinalRows        = null,
       forceFull            = false,
+      shiftMeta            = {},   // {code -> {monthlyCap, forbidNextDay:[]}}
+      maxWorkdaysPerMonth  = null, // number | null
+      prevDayShifts        = {},   // {personId -> last-day-of-prev-month code}
     } = opts;
 
     const lines = [];
     const log = (...a) => lines.push(a.join(" "));
     const warnings = [];
+
+    // Build helper lookups for the per-shift constraints.
+    function metaFor(code) {
+      const m = shiftMeta && shiftMeta[code];
+      if (!m) return { monthlyCap: null, forbidNextDay: new Set() };
+      const cap = (typeof m.monthlyCap === "number" && m.monthlyCap > 0) ? m.monthlyCap : null;
+      const fset = new Set();
+      const fnd = m.forbidNextDay;
+      if (Array.isArray(fnd)) for (const x of fnd) {
+        if (x) fset.add(String(x).trim().toUpperCase());
+      } else if (typeof fnd === "string") {
+        for (const x of fnd.split(",")) {
+          const v = x.trim().toUpperCase();
+          if (v) fset.add(v);
+        }
+      }
+      return { monthlyCap: cap, forbidNextDay: fset };
+    }
+    // "*" in forbidNextDay means "force N the day after".
+    function prevDayForcesRest(prevCode) {
+      if (!prevCode) return false;
+      return metaFor(prevCode).forbidNextDay.has("*");
+    }
+    function prevDayForbids(prevCode, candidateShift) {
+      if (!prevCode) return false;
+      const fs = metaFor(prevCode).forbidNextDay;
+      if (!fs.size) return false;
+      if (fs.has("*")) return true; // force N -> nothing else allowed
+      return fs.has(String(candidateShift || "").trim().toUpperCase());
+    }
 
     // ---------- read current ----------
     const { dates, demand } = parseDemand(demandRows);
@@ -338,6 +387,37 @@
       for (const [d, code] of Object.entries(registered[p] || {})) schedule[p][d] = code;
     }
 
+    // ---------- cross-month carry-over (Rule 8) ----------
+    // If a person worked a shift on the LAST DAY of the previous month that
+    // forbids any work the next day (forbidNextDay contains "*", typical for
+    // a late/heavy shift such as C22), force them to N on day 1 of THIS
+    // month -- but only if they haven't explicitly registered something else
+    // on that day (registrations always win, the admin will see a CONFLICT
+    // warning instead).
+    if (dates.length && prevDayShifts && Object.keys(prevDayShifts).length) {
+      const firstDate = dates[0];
+      for (const p of people) {
+        const prev = prevDayShifts[p];
+        if (!prev || !prevDayForcesRest(prev)) continue;
+        const cur = schedule[p][firstDate];
+        if (cur && !sundays.has(firstDate)) {
+          // Person registered something else on day 1; flag conflict but
+          // don't auto-override (admin decides).
+          if (cur !== "N") {
+            warnings.push(
+              `WARNING: ${p} worked ${prev} on the last day of the previous ` +
+              `month (carry-over rule requires N on ${firstDate}), but ` +
+              `they are registered/locked for '${cur}' on ${firstDate}. ` +
+              `Edit the registration or remove the carry-over rule.`
+            );
+          }
+        } else if (!sundays.has(firstDate)) {
+          schedule[p][firstDate] = "N";
+          log(`Carry-over: ${p} -> N on ${firstDate} (worked ${prev} previous month).`);
+        }
+      }
+    }
+
     // ---------- helpers (closures over schedule) ----------
     const isOff = c => OFF_CODES.has(c) || c === PLACEHOLDER;
     const isN   = c => c === "N" || c === PLACEHOLDER;
@@ -390,6 +470,20 @@
     const overCapacity = [];
     const workDates = dates.filter(d => !sundays.has(d));
 
+    // What did each person work the calendar day BEFORE `date`? For day 0
+    // that's `prevDayShifts` (last day of previous month). For day i>0 it's
+    // schedule[p][dates[i-1]].
+    function prevDayShiftOf(p, date) {
+      const idx = dateIndex[date];
+      if (idx === 0) return prevDayShifts ? prevDayShifts[p] : null;
+      if (idx > 0)  return schedule[p][dates[idx - 1]];
+      return null;
+    }
+
+    // Soft-violations: when we couldn't honor a cap because the schedule
+    // would otherwise be infeasible. Reported as warnings (not FATAL).
+    const capRelaxed = [];
+
     workDates.forEach((d, dayIdx) => {
       // Skip locked dates whose demand is already met
       if (lockedDates.has(d) && remainingDemand(d).length === 0) return;
@@ -400,8 +494,16 @@
       if (free.length < needed.length) overCapacity.push([d, needed.length, free.length]);
 
       // 1) Pick extras for OFF (PLACEHOLDER N)
+      //    A person whose previous-day shift forces rest MUST land in this
+      //    bucket today.
       const surplus = free.length - needed.length;
-      if (surplus > 0) {
+      const mustRest = free.filter(p => prevDayForcesRest(prevDayShiftOf(p, d)));
+      if (mustRest.length) {
+        for (const p of mustRest) schedule[p][d] = PLACEHOLDER;
+        free = people.filter(p => schedule[p][d] === "");
+      }
+      const surplusNow = free.length - needed.length;
+      if (surplusNow > 0) {
         const offKey = p => [
           -shiftTypesCovered(p),
           ndays(p),
@@ -411,8 +513,8 @@
         const unsafe = free.filter(p =>  adjacentN(p, d));
         sortByKey(safe, offKey);
         sortByKey(unsafe, offKey);
-        let chosen = safe.slice(0, surplus);
-        if (chosen.length < surplus) chosen = chosen.concat(unsafe.slice(0, surplus - chosen.length));
+        let chosen = safe.slice(0, surplusNow);
+        if (chosen.length < surplusNow) chosen = chosen.concat(unsafe.slice(0, surplusNow - chosen.length));
         for (const p of chosen) schedule[p][d] = PLACEHOLDER;
         free = people.filter(p => schedule[p][d] === "");
       }
@@ -430,10 +532,43 @@
         return compareTuple(ka, kb);
       });
 
-      // 3) Assign each shift, preferring people who NEED it most
+      // 3) Assign each shift, preferring people who NEED it most.
+      //    Filter candidates by:
+      //      - monthly cap for this shift (Rule 7)
+      //      - forbidNextDay from the previous calendar day (Rule 8)
+      //      - global maxWorkdaysPerMonth (Rule 9)
+      //    When NO candidate passes all filters we relax the soft caps
+      //    (monthlyCap, maxWorkdaysPerMonth) so the demand is still met --
+      //    and emit a WARNING describing what we had to relax.
       for (const shift of orderedNeeded) {
         if (!free.length) break;
-        const candidate = minBy(free, p => [
+        const meta = metaFor(shift);
+        const passCap     = p => meta.monthlyCap == null || (shiftCount[p][shift] || 0) < meta.monthlyCap;
+        const passWorkCap = p => maxWorkdaysPerMonth == null || workdays(p) < maxWorkdaysPerMonth;
+        const passForbid  = p => !prevDayForbids(prevDayShiftOf(p, d), shift);
+
+        let pool = free.filter(p => passCap(p) && passWorkCap(p) && passForbid(p));
+        let relaxedTags = [];
+
+        if (!pool.length) {
+          // Relaxation order: keep forbidNextDay (it's a real rest
+          // requirement) but relax the monthly cap first, then the workday
+          // cap. forbidNextDay is treated as hard because relaxing it would
+          // schedule unsafe back-to-back patterns.
+          pool = free.filter(p => passWorkCap(p) && passForbid(p));
+          if (pool.length) relaxedTags.push("monthly-cap");
+        }
+        if (!pool.length) {
+          pool = free.filter(p => passForbid(p));
+          if (pool.length) relaxedTags.push("max-workdays");
+        }
+        if (!pool.length) {
+          // Even the hard forbid blocks every remaining person -- nothing
+          // we can do but leave the slot unfilled (existing behavior).
+          continue;
+        }
+
+        const candidate = minBy(pool, p => [
           shiftCount[p][shift] || 0,
           -shiftTypesMissing(p),
           workdays(p),
@@ -441,8 +576,25 @@
         schedule[candidate][d] = shift;
         shiftCount[candidate][shift] = (shiftCount[candidate][shift] || 0) + 1;
         free = free.filter(p => p !== candidate);
+
+        if (relaxedTags.length) {
+          capRelaxed.push([d, shift, candidate, relaxedTags.join(", ")]);
+        }
       }
     });
+
+    if (capRelaxed.length) {
+      // Summarise rather than spam one warning per cell.
+      const byTag = {};
+      for (const [d, s, p, tag] of capRelaxed) {
+        (byTag[tag] = byTag[tag] || []).push(`${p}@${d}:${s}`);
+      }
+      for (const [tag, list] of Object.entries(byTag)) {
+        warnings.push(
+          `WARNING: had to relax ${tag} on ${list.length} assignment(s) to keep demand met: ${list.slice(0, 8).join(", ")}${list.length > 8 ? `, ...(+${list.length - 8} more)` : ""}.`
+        );
+      }
+    }
 
     // PLACEHOLDER -> N
     for (const p of people) {

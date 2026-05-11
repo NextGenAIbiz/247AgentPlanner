@@ -226,18 +226,86 @@
   }
 
   // ---------- shift types ----------
-  // Stored as JSON array: [{code:"C6", desc:"6:00 shift"}, ...]
+  // Stored as JSON array. Each entry can carry optional scheduling
+  // constraints used by scheduler.js:
+  //   {
+  //     code: "C13",
+  //     desc: "13:00 shift",
+  //     monthlyCap: 7,                  // optional: max times/person/month
+  //     forbidNextDay: ["C6", "C10"],   // optional: codes NOT allowed the
+  //                                     //           day after this shift.
+  //                                     //           Token "*" means "force N
+  //                                     //           the next day" (used for
+  //                                     //           heavy/late shifts like
+  //                                     //           C22 that need rest).
+  //                                     //           Applies within-month
+  //                                     //           AND across month
+  //                                     //           boundaries (using last
+  //                                     //           day of previous month).
+  //   }
+  // Older entries that only have {code, desc} are upgraded silently to the
+  // new shape on read.
+  function normalizeForbidList(v) {
+    if (Array.isArray(v)) {
+      return v.map(x => String(x || "").trim().toUpperCase()).filter(Boolean);
+    }
+    if (typeof v === "string") {
+      return v.split(",").map(x => x.trim().toUpperCase()).filter(Boolean);
+    }
+    return [];
+  }
   function getShiftTypes() {
     const raw = get("shift_types");
     if (!raw) return [];
-    try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; }
-    catch (_) { return []; }
+    try {
+      const v = JSON.parse(raw);
+      if (!Array.isArray(v)) return [];
+      return v.map(s => {
+        const code = String((s && s.code) || "").trim();
+        if (!code) return null;
+        let cap = (s && s.monthlyCap);
+        if (typeof cap === "string") cap = parseInt(cap.trim(), 10);
+        if (typeof cap !== "number" || !isFinite(cap) || cap <= 0) cap = null;
+        return {
+          code,
+          desc: String((s && s.desc) || ""),
+          monthlyCap: cap,
+          forbidNextDay: normalizeForbidList(s && s.forbidNextDay),
+        };
+      }).filter(Boolean);
+    } catch (_) { return []; }
   }
-  function setShiftTypes(list) { set("shift_types", JSON.stringify(list || [])); }
+  function setShiftTypes(list) {
+    const out = (list || []).map(s => ({
+      code: String(s.code || "").trim(),
+      desc: String(s.desc || ""),
+      monthlyCap: (typeof s.monthlyCap === "number" && s.monthlyCap > 0) ? s.monthlyCap : null,
+      forbidNextDay: normalizeForbidList(s.forbidNextDay),
+    })).filter(s => s.code);
+    set("shift_types", JSON.stringify(out));
+  }
   function getShiftCodes() {
     return getShiftTypes()
       .map(s => s && s.code && String(s.code).trim())
       .filter(Boolean);
+  }
+
+  // ---------- global scheduling rules ----------
+  // Admin-tunable knobs that apply to every plan. Right now we only have
+  // one: a per-person monthly cap on working days (workdays = anything that
+  // is neither N nor P). null/blank means "no cap".
+  function getMaxWorkdaysPerMonth() {
+    const raw = get("max_workdays_per_month");
+    if (raw == null) return null;
+    const n = parseInt(String(raw).trim(), 10);
+    return (isNaN(n) || n <= 0) ? null : n;
+  }
+  function setMaxWorkdaysPerMonth(n) {
+    if (n == null || n === "" || isNaN(parseInt(n, 10)) || parseInt(n, 10) <= 0) {
+      set("max_workdays_per_month", null);
+    } else {
+      set("max_workdays_per_month", String(parseInt(n, 10)));
+    }
   }
 
   // ---------- per-period rows ----------
@@ -770,6 +838,9 @@
 
     // shift types
     getShiftTypes, setShiftTypes, getShiftCodes,
+
+    // global scheduling rules
+    getMaxWorkdaysPerMonth, setMaxWorkdaysPerMonth,
 
     // periods
     periodKey, periodPaths, currentPaths,

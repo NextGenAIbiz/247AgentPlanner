@@ -283,7 +283,7 @@
           if (target === "final")   loadFinal();
           else if (target === "demand")  loadDemand();
           else if (target === "register") loadRegister();
-          else if (target === "setting") { loadPeople(); loadGroups(); loadShiftTypes(); }
+          else if (target === "setting") { loadPeople(); loadGroups(); loadShiftTypes(); loadSchedulingRules(); }
         } catch (e) {
           console.warn("[shift-planner] tab refresh failed for", target, e);
         }
@@ -906,6 +906,24 @@
     const snaps = Store.readPlanSnapshots(planId, appConfig.month, appConfig.year);
     const prevFinal = Store.readPlanFinal(planId, appConfig.month, appConfig.year);
 
+    // Per-shift constraints from Setting -> Shift Types (Rules 7+8).
+    const shiftMeta = {};
+    for (const s of (Store.getShiftTypes() || [])) {
+      if (!s || !s.code) continue;
+      shiftMeta[s.code] = {
+        monthlyCap:    s.monthlyCap || null,
+        forbidNextDay: s.forbidNextDay || [],
+      };
+    }
+    const maxWorkdaysPerMonth = Store.getMaxWorkdaysPerMonth();
+
+    // Cross-month carry-over: collect what the people in this plan's groups
+    // worked on the LAST DAY of the previous month, across ALL plans
+    // (because a person might have been on plan A last month and plan B
+    // this month). The scheduler uses this to enforce forbidNextDay and
+    // the "*" force-rest rule across the boundary.
+    const prevDayShifts = collectPrevMonthLastDayShifts(groupPids);
+
     let result;
     try {
       result = Scheduler.runSchedule({
@@ -917,6 +935,9 @@
         // Always full-rebuild: the user wants a single Generate button that
         // re-arranges every person from scratch.
         forceFull:            true,
+        shiftMeta,
+        maxWorkdaysPerMonth,
+        prevDayShifts,
       });
     } catch (e) {
       console.error(e);
@@ -949,6 +970,42 @@
       if (reportEl) reportEl.textContent = result.report || "Plan could not be generated.";
       status(`final-status-${planId}`, "Failed: see warnings", "error");
     }
+  }
+
+  // Look up the shift each person in `targetPersonSet` worked on the LAST
+  // DAY of the previous month. We scan EVERY plan from that month so we
+  // catch the case where the person was in a different plan/group then.
+  // Returns { personId -> "C22" | "C13" | ... }. Empty {} when there is
+  // no previous month yet (e.g. January 2020 on a fresh install).
+  function collectPrevMonthLastDayShifts(targetPersonSet) {
+    const out = {};
+    try {
+      const m = appConfig.month;
+      const y = appConfig.year;
+      const prevMonth = m === 1 ? 12 : m - 1;
+      const prevYear  = m === 1 ? y - 1 : y;
+      const prevDates = Store.generateDates(prevMonth, prevYear);
+      if (!prevDates.length) return out;
+      const lastDate  = prevDates[prevDates.length - 1];
+      const prevPlans = Store.getPlans(prevMonth, prevYear) || [];
+      for (const pp of prevPlans) {
+        const rows = Store.readPlanFinal(pp.id, prevMonth, prevYear);
+        if (!rows || !rows.length) continue;
+        const header = rows[0] || [];
+        const idx = header.indexOf(lastDate);
+        if (idx < 1) continue;
+        for (const r of rows.slice(1)) {
+          const id = (r[0] || "").trim();
+          if (!id) continue;
+          if (targetPersonSet && targetPersonSet.size && !targetPersonSet.has(id)) continue;
+          const code = (r[idx] || "").trim();
+          if (code) out[id] = code;
+        }
+      }
+    } catch (e) {
+      console.warn("[shift-planner] collectPrevMonthLastDayShifts failed:", e);
+    }
+    return out;
   }
 
   function generateAll() {
@@ -1223,26 +1280,120 @@
   // ---------- Shift Types (Setting tab) ----------
   function loadShiftTypes() {
     shiftTypesData = Store.getShiftTypes();
-    renderSimpleTable("sft-table", ["Code", "Description"],
-      shiftTypesData.map(s => [s.code, s.desc || ""]),
-      { idLabel: "C", placeholder: "Description (optional)" });
+    renderShiftTypesTable();
     applyFrozenState();
+  }
+
+  function renderShiftTypesTable() {
+    const t = document.getElementById("sft-table");
+    if (!t) return;
+    t.innerHTML = "";
+    const headers = ["Code", "Description", "Monthly Cap", "Forbid Next Day"];
+    const thead = document.createElement("thead");
+    const trh = document.createElement("tr");
+    headers.forEach((h, i) => {
+      const th = document.createElement("th");
+      th.textContent = h;
+      if (i === 0) th.classList.add("col-name");
+      trh.appendChild(th);
+    });
+    const thAct = document.createElement("th");
+    thAct.classList.add("col-action");
+    trh.appendChild(thAct);
+    thead.appendChild(trh);
+    t.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    if (!shiftTypesData.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = headers.length + 1;
+      td.className = "empty";
+      td.textContent = "(none yet)";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    } else {
+      for (const s of shiftTypesData) tbody.appendChild(buildShiftTypeRow(s));
+    }
+    t.appendChild(tbody);
+  }
+
+  function buildShiftTypeRow(s) {
+    const tr = document.createElement("tr");
+    // Code (read-only)
+    const tdCode = document.createElement("td");
+    tdCode.classList.add("col-name");
+    tdCode.textContent = s.code || "";
+    tr.appendChild(tdCode);
+    // Description
+    const tdDesc = document.createElement("td");
+    const inpDesc = document.createElement("input");
+    inpDesc.className = "cell text-cell sft-desc";
+    inpDesc.value = s.desc || "";
+    inpDesc.placeholder = "Description (optional)";
+    tdDesc.appendChild(inpDesc);
+    tr.appendChild(tdDesc);
+    // Monthly Cap
+    const tdCap = document.createElement("td");
+    const inpCap = document.createElement("input");
+    inpCap.className = "cell sft-cap";
+    inpCap.type = "number";
+    inpCap.min = "1";
+    inpCap.step = "1";
+    inpCap.style.width = "70px";
+    inpCap.placeholder = "no cap";
+    inpCap.value = (s.monthlyCap != null && s.monthlyCap > 0) ? String(s.monthlyCap) : "";
+    tdCap.appendChild(inpCap);
+    tr.appendChild(tdCap);
+    // Forbid Next Day
+    const tdForbid = document.createElement("td");
+    const inpForbid = document.createElement("input");
+    inpForbid.className = "cell text-cell sft-forbid";
+    inpForbid.placeholder = "e.g. C6,C10 or *";
+    inpForbid.value = (s.forbidNextDay || []).join(",");
+    tdForbid.appendChild(inpForbid);
+    tr.appendChild(tdForbid);
+    // Action
+    const tdAct = document.createElement("td");
+    tdAct.classList.add("col-action");
+    const btn = document.createElement("button");
+    btn.className = "btn-danger";
+    btn.textContent = "\u2715";
+    btn.title = "Remove";
+    btn.onclick = () => {
+      if (!confirm(`Remove shift ${s.code}?`)) return;
+      tr.remove();
+    };
+    tdAct.appendChild(btn);
+    tr.appendChild(tdAct);
+    return tr;
   }
 
   function saveShiftTypes() {
     if (Store.isFrozen()) return frozenAlert();
-    const rows = gatherSimpleTable("sft-table");
+    const t = document.getElementById("sft-table");
+    if (!t) return;
     const seen = new Set();
     const out = [];
-    for (const r of rows) {
-      const code = (r[0] || "").trim();
-      const desc = (r[1] || "").trim();
+    for (const tr of t.querySelectorAll("tbody tr")) {
+      const codeTd = tr.querySelector("td.col-name");
+      if (!codeTd || codeTd.classList.contains("empty")) continue;
+      const code = (codeTd.textContent || "").trim();
       if (!code) continue;
       if (seen.has(code)) {
         status("sft-status", `Duplicate shift code: ${code}`, "error"); return;
       }
       seen.add(code);
-      out.push({ code, desc });
+      const desc = (tr.querySelector("input.sft-desc")?.value || "").trim();
+      const capRaw = (tr.querySelector("input.sft-cap")?.value || "").trim();
+      const capNum = capRaw === "" ? null : parseInt(capRaw, 10);
+      const cap = (typeof capNum === "number" && !isNaN(capNum) && capNum > 0) ? capNum : null;
+      const forbidRaw = (tr.querySelector("input.sft-forbid")?.value || "").trim();
+      const forbid = forbidRaw
+        .split(",")
+        .map(x => x.trim().toUpperCase())
+        .filter(Boolean);
+      out.push({ code, desc, monthlyCap: cap, forbidNextDay: forbid });
     }
     Store.setShiftTypes(out);
     shiftTypesData = out;
@@ -1254,11 +1405,31 @@
     const code = (prompt("Shift code (e.g. C6, C730):", "") || "").trim();
     if (!code) return;
     const t = document.getElementById("sft-table");
-    const used = new Set([...t.querySelectorAll("tbody tr td:first-child")].map(td => td.textContent.trim()));
+    const used = new Set([...t.querySelectorAll("tbody tr td.col-name")].map(td => td.textContent.trim()));
     if (used.has(code)) { alert("That shift code already exists."); return; }
     const desc = (prompt(`Description for ${code} (optional):`, "") || "").trim();
-    appendSimpleTableRow("sft-table", [code, desc], { idLabel: "C" });
+    // Drop the "(none yet)" placeholder if present.
+    let tbody = t.querySelector("tbody");
+    if (!tbody) { tbody = document.createElement("tbody"); t.appendChild(tbody); }
+    const empty = tbody.querySelector("td.empty");
+    if (empty) tbody.innerHTML = "";
+    tbody.appendChild(buildShiftTypeRow({ code, desc, monthlyCap: null, forbidNextDay: [] }));
     status("sft-status", 'Click "Save Shift Types" to persist.', "info");
+  }
+
+  // ---------- Scheduling Rules (global) ----------
+  function loadSchedulingRules() {
+    const cap = Store.getMaxWorkdaysPerMonth();
+    const inp = document.getElementById("max-workdays-inp");
+    if (inp) inp.value = (cap != null && cap > 0) ? String(cap) : "";
+    applyFrozenState();
+  }
+  function saveSchedulingRules() {
+    if (Store.isFrozen()) return frozenAlert();
+    const inp = document.getElementById("max-workdays-inp");
+    const raw = (inp && inp.value || "").trim();
+    Store.setMaxWorkdaysPerMonth(raw === "" ? null : parseInt(raw, 10));
+    status("rules-status", "Saved!", "success");
   }
 
   // ---------- Generic 2-column simple table (Groups & Shift Types) ----------
@@ -2002,6 +2173,9 @@
     else if (k === "shift_types") {
       loadShiftTypes();
     }
+    else if (k === "max_workdays_per_month") {
+      loadSchedulingRules();
+    }
     else if (k === "config") {
       const newCfg = Store.getConfig();
       appConfig = { ...appConfig, ...newCfg, periods: Store.listPeriods() };
@@ -2185,6 +2359,7 @@
     loadConfig();
     loadGroups();
     loadShiftTypes();
+    loadSchedulingRules();
     loadPeople();
     loadRegister();
     loadDemand();
@@ -2209,6 +2384,8 @@
     loadGroups, saveGroups, addGroup,
     // Setting -> Shift Types
     loadShiftTypes, saveShiftTypes, addShiftType,
+    // Setting -> Scheduling Rules
+    loadSchedulingRules, saveSchedulingRules,
     // Period / actions
     applyPeriod, toggleFreeze, exportExcel, exportBackup,
   };
