@@ -220,7 +220,21 @@
         document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
         document.querySelectorAll(".panel").forEach(x => x.classList.remove("active"));
         t.classList.add("active");
-        document.getElementById(t.dataset.tab).classList.add("active");
+        const target = t.dataset.tab;
+        document.getElementById(target).classList.add("active");
+        // Safety net: when the admin navigates to a tab, refresh that tab
+        // from storage so it reflects the latest state. Surgical DOM updates
+        // can miss in rare race conditions (stale plan references, missing
+        // Final card at moment of edit, etc.), so a deterministic reload on
+        // tab activation guarantees the view is always in sync.
+        try {
+          if (target === "final")   loadFinal();
+          else if (target === "demand")  loadDemand();
+          else if (target === "register") loadRegister();
+          else if (target === "setting") { loadPeople(); loadGroups(); loadShiftTypes(); }
+        } catch (e) {
+          console.warn("[shift-planner] tab refresh failed for", target, e);
+        }
       };
     });
   }
@@ -730,6 +744,7 @@
   }
 
   function renderFinalCard(plan) {
+    console.debug("[shift-planner] renderFinalCard", plan.id, "groupIds=", plan.groupIds);
     const card = document.createElement("div");
     card.className = "plan-card";
     card.dataset.planId = plan.id;
