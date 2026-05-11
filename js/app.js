@@ -39,7 +39,7 @@
   // When we ourselves just persisted something, Supabase Realtime will
   // broadcast the same value back to us; if we re-render blindly, any
   // in-progress UI state (clicked checkbox, focused input, warning box,
-  // verification report...) gets wiped.
+  // warning box, status pill...) gets wiped.
   //
   // We have two suppression mechanisms:
   // 1. Structural compare (samePlans / sameRows below) -- works for in-memory
@@ -748,7 +748,7 @@
 
   // Update just the group-chips area of a Final card without rebuilding the
   // whole Final container. This avoids wiping in-progress UI state in other
-  // cards (e.g. half-typed verification report scrolls).
+  // cards (e.g. open status messages or warning lists).
   function updateFinalCardChips(plan) {
     const card = document.querySelector(`#finals-container .plan-card[data-plan-id="${CSS.escape(plan.id)}"]`);
     if (!card) {
@@ -864,13 +864,6 @@
     wrap.appendChild(tbl);
     card.appendChild(wrap);
 
-    // Verification report
-    const report = document.createElement("pre");
-    report.id = `report-${plan.id}`;
-    report.className = "verification";
-    report.textContent = 'Click "Generate" to build this plan\'s schedule.';
-    card.appendChild(report);
-
     // Render existing final rows if present. Pass `tbl` directly because
     // `card` isn't in the DOM yet at this point.
     const finRows = Store.readPlanFinal(plan.id, appConfig.month, appConfig.year);
@@ -941,9 +934,7 @@
       });
     } catch (e) {
       console.error(e);
-      const reportEl = document.getElementById(`report-${planId}`);
-      if (reportEl) reportEl.textContent = "Error: " + (e.message || e) + "\n\n" + (e.stack || "");
-      status(`final-status-${planId}`, "Failed (exception)", "error");
+      status(`final-status-${planId}`, "Failed (exception): " + (e.message || e), "error");
       return;
     }
 
@@ -959,16 +950,12 @@
         peopleGroupMap: Store.getPeopleGroupMap(),
         groupNameMap: Store.getGroupNameMap(),
       });
-      const reportEl = document.getElementById(`report-${planId}`);
-      if (reportEl) reportEl.textContent = result.report || "";
       const dirtyMsg = (result.dirty_dates && result.dirty_dates.length)
         ? ` (re-arranged ${result.dirty_dates.length} date${result.dirty_dates.length === 1 ? "" : "s"})`
         : (result.locked_dates && result.locked_dates.length ? " (no changes detected)" : "");
       status(`final-status-${planId}`, `Generated${dirtyMsg}.`, "success");
     } else {
-      const reportEl = document.getElementById(`report-${planId}`);
-      if (reportEl) reportEl.textContent = result.report || "Plan could not be generated.";
-      status(`final-status-${planId}`, "Failed: see warnings", "error");
+      status(`final-status-${planId}`, "Failed: see warnings above.", "error");
     }
   }
 
@@ -2243,7 +2230,7 @@
       }
       else if (planKind.kind === "final") {
         // The Final tab carries TRANSIENT UI state that lives outside the
-        // <table> (warnings box, status pill, verification report). If we
+        // <table> (warnings box, status pill). If we
         // re-run loadFinal() on every Realtime echo, those get wiped after
         // a few seconds -- which is exactly what users were seeing when the
         // warnings/conflict alerts flashed briefly and disappeared after

@@ -362,13 +362,6 @@ h3 { margin: 16px 0 8px; font-size: 14px; color: #374151; }
   display: flex; gap: 8px; margin: 8px 0; align-items: center; flex-wrap: wrap;
 }
 .plan-card .plan-toolbar .status { margin-left: auto; }
-.plan-card .verification {
-  margin-top: 12px;
-  background: #0f172a; color: #e2e8f0;
-  border-radius: 6px; padding: 12px;
-  font-size: 11px; line-height: 1.5; max-height: 280px;
-  overflow: auto; white-space: pre; font-family: ui-monospace, "SF Mono", Menlo, monospace;
-}
 
 /* ---------- Setting tab (3 sections) ---------- */
 .setting-section { margin-bottom: 24px; }
