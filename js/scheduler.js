@@ -181,6 +181,18 @@
     }
 
     // 2. Sundays + over-registered shifts
+    //
+    // If MORE people register for shift X on date D than demand[X][D] needs,
+    // we:
+    //   - Emit a CONFLICT warning so the admin sees what happened.
+    //   - Honor the first `demand` registrants (in people order) -- their
+    //     registration stands.
+    //   - Drop the surplus registrations: those people become "unassigned"
+    //     for that date, so the main scheduler loop further down will give
+    //     them a different shift (if another shift is under-staffed that
+    //     day) or an N. This implements the admin request: "neu co nhieu
+    //     nguoi dang ky cung 1 ca, nhieu hon demand, thi thong bao cho
+    //     admin va sap xep tu dong theo demand".
     for (const date of dates) {
       if (sundays.has(date)) {
         for (const p of people) {
@@ -201,7 +213,16 @@
       for (const [shift, ppl] of Object.entries(perShift)) {
         const need = demand[shift][date];
         if (ppl.length > need) {
-          warnings.push(`CONFLICT ${date} shift ${shift}: ${ppl.length} people registered (${ppl.join(", ")}) but demand is only ${need}.`);
+          const honored = ppl.slice(0, need);
+          const dropped = ppl.slice(need);
+          warnings.push(
+            `CONFLICT ${date} shift ${shift}: ${ppl.length} people registered (${ppl.join(", ")}) ` +
+            `but demand is only ${need}. Honoring ${honored.join(", ") || "(none)"}; ` +
+            `auto-arranging ${dropped.join(", ")} (will be placed in another open shift or N).`
+          );
+          for (const p of dropped) {
+            if (registered[p]) delete registered[p][date];
+          }
         }
       }
     }
