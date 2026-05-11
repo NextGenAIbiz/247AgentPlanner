@@ -763,20 +763,19 @@
     header.appendChild(spacer);
     card.appendChild(header);
 
-    // Toolbar
+    // Toolbar -- single "Generate Plan" button that re-arranges every person
+    // in this plan's groups from scratch based on the current demand +
+    // registrations. (We deliberately drop the old smart-incremental mode:
+    // admins found it confusing to have two buttons, and the cost of a full
+    // re-arrange is small for a single plan.)
     const tbar = document.createElement("div");
     tbar.className = "plan-toolbar";
     const genBtn = document.createElement("button");
     genBtn.className = "btn-success";
-    genBtn.textContent = "Generate";
-    genBtn.title = "Smart: only re-arrange dates whose registration/demand changed";
-    genBtn.onclick = () => generatePlan(plan.id, false);
+    genBtn.textContent = "Generate Plan";
+    genBtn.title = "Re-arrange every person in this plan's groups based on the current demand + registrations";
+    genBtn.onclick = () => generatePlan(plan.id);
     tbar.appendChild(genBtn);
-    const fullBtn = document.createElement("button");
-    fullBtn.className = "btn-warn";
-    fullBtn.textContent = "Full Regenerate";
-    fullBtn.onclick = () => generatePlan(plan.id, true);
-    tbar.appendChild(fullBtn);
     const statusEl = document.createElement("span");
     statusEl.className = "status";
     statusEl.id = `final-status-${plan.id}`;
@@ -822,7 +821,7 @@
     return card;
   }
 
-  function generatePlan(planId, forceFull = false) {
+  function generatePlan(planId) {
     if (Store.isFrozen()) return frozenAlert();
     const plan = planById(planId);
     if (!plan) return;
@@ -830,7 +829,7 @@
       status(`final-status-${planId}`, "Pick at least one group for this plan in the Demand tab.", "warn");
       return;
     }
-    status(`final-status-${planId}`, forceFull ? "Full regenerate..." : "Generating (smart)...", "info");
+    status(`final-status-${planId}`, "Generating...", "info");
 
     // Build inputs scoped to this plan.
     const planDemand = Store.readPlanDemand(planId, appConfig.month, appConfig.year);
@@ -848,7 +847,9 @@
         prevRegisterSnapRows: snaps.register,
         prevDemandSnapRows:   snaps.demand,
         prevFinalRows:        prevFinal,
-        forceFull,
+        // Always full-rebuild: the user wants a single Generate button that
+        // re-arranges every person from scratch.
+        forceFull:            true,
       });
     } catch (e) {
       console.error(e);
@@ -883,13 +884,13 @@
     }
   }
 
-  function generateAll(forceFull = false) {
+  function generateAll() {
     if (Store.isFrozen()) return frozenAlert();
     if (!plansData || plansData.length === 0) {
       alert("No plans to generate. Add a plan in the Demand tab first.");
       return;
     }
-    for (const p of plansData) generatePlan(p.id, forceFull);
+    for (const p of plansData) generatePlan(p.id);
     status("fin-status", `Generated ${plansData.length} plan(s).`, "success");
   }
 

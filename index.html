@@ -132,8 +132,7 @@
 
 <div id="final" class="panel">
   <div class="toolbar">
-    <button class="btn-success" onclick="App.generateAll(false)" title="Smart: only re-arrange dates whose registration/demand changed since last generate, for every plan">Generate All Plans</button>
-    <button class="btn-warn"    onclick="App.generateAll(true)"  title="Discard all previous finals and rebuild every plan from scratch">Full Regenerate All</button>
+    <button class="btn-success" onclick="App.generateAll()" title="Re-arrange every plan from scratch using the latest demand and registrations">Generate All Plans</button>
     <span id="fin-status" class="status" style="display:none"></span>
   </div>
   <div id="finals-container" class="plans-container">
