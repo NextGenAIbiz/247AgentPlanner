@@ -38,7 +38,59 @@
   // Used by applyExternalChange to detect "self-echo" cloud notifications.
   // When we ourselves just persisted something, Supabase Realtime will
   // broadcast the same value back to us; if we re-render blindly, any
-  // in-progress UI state (clicked checkbox, focused input...) gets wiped.
+  // in-progress UI state (clicked checkbox, focused input, warning box,
+  // verification report...) gets wiped.
+  //
+  // We have two suppression mechanisms:
+  // 1. Structural compare (samePlans / sameRows below) -- works for in-memory
+  //    arrays like plansData but unreliable for tables rendered into DOM
+  //    (CSV serialize <-> DOM textContent round-trip is lossy).
+  // 2. Recent-write marker (markSelfWrite / isSelfEcho below) -- bulletproof
+  //    because we know which keys we just wrote. We use this for the writes
+  //    that come out of generatePlan / persistPlanMeta etc. so that the
+  //    Realtime echo a few seconds later doesn't tear down warnings/status.
+  const recentSelfWrites = new Map(); // key -> Date.now()
+  const SELF_ECHO_WINDOW_MS = 8000;
+  function markSelfWrite(key) {
+    if (!key) return;
+    recentSelfWrites.set(key, Date.now());
+  }
+  function isSelfEcho(key) {
+    const t = recentSelfWrites.get(key);
+    if (t == null) return false;
+    if (Date.now() - t > SELF_ECHO_WINDOW_MS) {
+      recentSelfWrites.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  // Thin wrappers around the plan-scoped Store writers that also mark the
+  // written key as a "recent self-write". Use these instead of calling
+  // Store.* directly so that the Realtime echo for this exact key gets
+  // suppressed in applyExternalChange and doesn't tear down UI state.
+  function setPlansMarked(plans) {
+    const opts = { month: appConfig.month, year: appConfig.year };
+    markSelfWrite(`period:${String(opts.year).padStart(4,"0")}-${String(opts.month).padStart(2,"0")}:plans`);
+    Store.setPlans(plans, opts);
+  }
+  function writePlanDemandMarked(planId, rows) {
+    const opts = { month: appConfig.month, year: appConfig.year };
+    markSelfWrite(Store.planDemandKey(planId, opts.month, opts.year));
+    Store.writePlanDemand(planId, rows, opts);
+  }
+  function writePlanFinalMarked(planId, rows) {
+    const opts = { month: appConfig.month, year: appConfig.year };
+    markSelfWrite(Store.planFinalKey(planId, opts.month, opts.year));
+    Store.writePlanFinal(planId, rows, opts);
+  }
+  function writePlanSnapshotsMarked(planId, demRows, regRows) {
+    const opts = { month: appConfig.month, year: appConfig.year };
+    markSelfWrite(Store.planDemandSnapKey(planId, opts.month, opts.year));
+    markSelfWrite(Store.planRegisterSnapKey(planId, opts.month, opts.year));
+    Store.writePlanSnapshots(planId, demRows, regRows, opts);
+  }
+
   function samePlans(a, b) {
     a = Array.isArray(a) ? a : [];
     b = Array.isArray(b) ? b : [];
@@ -406,14 +458,14 @@
       shifts:   shiftTypesData.map(s => s.code),
     };
     plansData.push(newPlan);
-    Store.setPlans(plansData, { month: appConfig.month, year: appConfig.year });
+    setPlansMarked(plansData);
 
     // Seed an empty demand table for this plan with all shifts.
     const dates = Store.generateDates(appConfig.month, appConfig.year);
     const demand = [["Plan", ...dates]];
     for (const s of newPlan.shifts) demand.push([s, ...new Array(dates.length).fill("0")]);
     demand.push(["Sum", ...new Array(dates.length).fill("0")]);
-    Store.writePlanDemand(newPlan.id, demand, { month: appConfig.month, year: appConfig.year });
+    writePlanDemandMarked(newPlan.id, demand);
 
     console.debug("[shift-planner] addPlan created:", newPlan);
     renderPlansContainer();
@@ -427,14 +479,14 @@
     if (!p) return;
     if (!confirm(`Remove plan "${p.name}"?\n\nThis deletes its demand, final and snapshots for ${appConfig.month}/${appConfig.year}.`)) return;
     plansData = plansData.filter(x => x.id !== planId);
-    Store.setPlans(plansData, { month: appConfig.month, year: appConfig.year });
+    setPlansMarked(plansData);
     Store.deletePlanData(planId, { month: appConfig.month, year: appConfig.year });
     renderPlansContainer();
     renderFinalsContainer();
   }
 
   function persistPlanMeta() {
-    Store.setPlans(plansData, { month: appConfig.month, year: appConfig.year });
+    setPlansMarked(plansData);
   }
 
   function renderPlansContainer() {
@@ -667,14 +719,14 @@
     const sumIdx = current.findIndex(r => (r[0] || "").trim().toLowerCase() === "sum");
     const insertAt = sumIdx > 0 ? sumIdx : current.length;
     current.splice(insertAt, 0, [code, ...new Array(dates.length).fill("0")]);
-    Store.writePlanDemand(planId, current, { month: appConfig.month, year: appConfig.year });
+    writePlanDemandMarked(planId, current);
     renderPlansContainer();
   }
 
   function savePlanDemand(planId) {
     if (Store.isFrozen()) return frozenAlert();
     const rows = gatherTable(`dem-table-${planId}`);
-    Store.writePlanDemand(planId, rows, { month: appConfig.month, year: appConfig.year });
+    writePlanDemandMarked(planId, rows);
     // Sync plan.shifts to match the demand rows (excluding Sum).
     const plan = planById(planId);
     if (plan) {
@@ -877,8 +929,8 @@
     renderWarnings(`warnings-box-${planId}`, result.warnings || []);
 
     if (result.ok) {
-      Store.writePlanFinal(planId, result.rows, { month: appConfig.month, year: appConfig.year });
-      Store.writePlanSnapshots(planId, planDemand, filteredReg, { month: appConfig.month, year: appConfig.year });
+      writePlanFinalMarked(planId, result.rows);
+      writePlanSnapshotsMarked(planId, planDemand, filteredReg);
 
       renderTable(`fin-table-${planId}`, result.rows, {
         editable: false, colorize: true,
@@ -1975,9 +2027,16 @@
       // the admin edits a plan card, we save to cloud, the cloud echoes
       // back, and we end up here. Re-rendering blindly would wipe the
       // user's in-progress UI state (checkboxes, focused inputs, scroll
-      // position). So compare the freshly-stored value to what we already
-      // have in memory, and skip the re-render when they match.
+      // position, warning box from a Generate run).
+      //
+      // First-line defence: if we just wrote this exact key locally in the
+      // last few seconds, it's our own echo -- skip everything. The
+      // structural compares below stay as a backup for unusual cases.
       console.debug("[live-sync] plan update:", k, planKind);
+      if (isSelfEcho(k)) {
+        console.debug("[live-sync] plan key self-echo (recent write) - skip:", k);
+        return;
+      }
       if (planKind.kind === "plans") {
         const fresh = Store.getPlans(appConfig.month, appConfig.year);
         if (samePlans(plansData, fresh)) {
