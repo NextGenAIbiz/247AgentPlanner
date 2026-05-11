@@ -1984,8 +1984,18 @@
           console.debug("[live-sync] plans unchanged (self-echo) - skip re-render");
           return;
         }
-        loadDemand();
-        loadFinal();
+        // Plans really did change from another browser. Keep things smooth:
+        // refresh in-memory plansData first, then surgically update the
+        // Final cards' chips/titles instead of nuking the whole container,
+        // so warnings / generated tables / report don't disappear.
+        plansData = fresh;
+        for (const p of plansData) {
+          updateFinalCardChips(p);
+          updateFinalCardTitle(p);
+        }
+        // Demand panel is editable -> safer to do a full rebuild so checkbox
+        // state matches the new plans list. (No warnings live here.)
+        renderPlansContainer();
       }
       else if (planKind.kind === "demand") {
         const fresh = Store.readPlanDemand(planKind.planId, appConfig.month, appConfig.year);
@@ -1999,8 +2009,35 @@
         loadDemand();
       }
       else if (planKind.kind === "final") {
-        // Final tables aren't editable, re-rendering is safe.
-        loadFinal();
+        // The Final tab carries TRANSIENT UI state that lives outside the
+        // <table> (warnings box, status pill, verification report). If we
+        // re-run loadFinal() on every Realtime echo, those get wiped after
+        // a few seconds -- which is exactly what users were seeing when the
+        // warnings/conflict alerts flashed briefly and disappeared after
+        // clicking Generate Plan. So compare the freshly stored final to
+        // what is currently rendered and skip the re-render on self-echo.
+        const fresh = Store.readPlanFinal(planKind.planId, appConfig.month, appConfig.year);
+        const tableId = `fin-table-${planKind.planId}`;
+        const tableEl = document.getElementById(tableId);
+        const current = tableEl ? gatherTable(tableId) : [];
+        if (sameRows(current, fresh)) {
+          console.debug("[live-sync] final unchanged (self-echo) - skip re-render");
+          return;
+        }
+        // Genuinely new final from another browser: re-render just that
+        // card's table without touching the surrounding warnings/report.
+        const card = document.querySelector(`#finals-container .plan-card[data-plan-id="${CSS.escape(planKind.planId)}"]`);
+        const tbl = card && card.querySelector(`#fin-table-${planKind.planId}`);
+        if (tbl && fresh.length) {
+          renderTable(tbl, fresh, {
+            editable: false, colorize: true,
+            peopleMap: peopleNamesMap,
+            peopleGroupMap: Store.getPeopleGroupMap(),
+            groupNameMap: Store.getGroupNameMap(),
+          });
+        } else {
+          loadFinal();
+        }
       }
     }
     else if (periodMatch) {
